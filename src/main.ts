@@ -1,0 +1,626 @@
+import * as THREE from 'three';
+import { registerSW } from 'virtual:pwa-register';
+
+import { Renderer } from './engine/renderer';
+import { Input } from './engine/input';
+import { audio } from './engine/audio';
+import { RNG } from './engine/rng';
+
+import { getMap, type Ent, type GameMap } from './world/mapgen';
+import { entKey, Overworld } from './world/overworld';
+import { BattleScene } from './battle/scene';
+import { BattleUI, type BattleConfig } from './ui/battleui';
+
+import {
+  FINAL_BOSS, GYM, GYMS, LEAGUE, RIVAL_COUNTER, RIVAL_NAME, START_ZONE,
+  STATIC_ENCOUNTERS, ZONE, type Enc, type Link,
+} from './data/world';
+import { evoLine, species } from './data/species';
+import { item as getItem } from './data/items';
+import { createMon, maxHp, nameOf } from './game/mon';
+import { makeTeam } from './battle/engine';
+import { deleteSave, fmtTime, hasSave, loadGame, saveGame, state } from './game/state';
+
+import { advanceDialogue, ask, fade, openOverlay, promptText, say, setHudVisible, toast, ui } from './ui/ui';
+import { openMainMenu, openParty, openShop, openPC, portrait } from './ui/menus';
+
+registerSW({ immediate: true });
+
+const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)!;
+
+type Mode = 'title' | 'overworld' | 'battle' | 'busy';
+
+/* ------------------------------------------------------------------ */
+/* Évènements scénarisés du rival                                      */
+/* ------------------------------------------------------------------ */
+const RIVAL_EVENTS: { zone: string; flag: string; lv: number; extras: string[] }[] = [
+  { zone: 'route2', flag: 'rival1', lv: 12, extras: ['ratinoc', 'piafleur'] },
+  { zone: 'route5', flag: 'rival2', lv: 26, extras: ['aiglombre', 'voltiny', 'spectrille'] },
+  { zone: 'route8', flag: 'rival3', lv: 40, extras: ['nyxpanthre', 'magmalv', 'papilore', 'sablotin'] },
+  { zone: 'route10', flag: 'rival4', lv: 52, extras: ['nyxpanthre', 'chimerok', 'sylphibou', 'maremora', 'drakoral'] },
+];
+
+function stageFor(lineId: string, lv: number): string {
+  const line = evoLine(lineId);
+  const idx = lv >= 36 ? 2 : lv >= 16 ? 1 : 0;
+  return line[Math.min(idx, line.length - 1)];
+}
+
+function rivalTeam(lv: number, extras: string[]): [string, number][] {
+  const starterLine = RIVAL_COUNTER[state.starter] ?? 'ondulin';
+  const team: [string, number][] = extras.map((sp, i) => [sp, Math.max(2, lv - 2 + (i % 2))]);
+  team.push([stageFor(starterLine, lv), lv + 2]);
+  return team;
+}
+
+/* ------------------------------------------------------------------ */
+class Game {
+  renderer = new Renderer($('#scene') as HTMLCanvasElement);
+  input = new Input();
+  battleScene = new BattleScene();
+  battleUI = new BattleUI(this.battleScene);
+  overworld: Overworld;
+  map!: GameMap;
+  mode: Mode = 'title';
+  private last = performance.now();
+  private installPrompt: (Event & { prompt(): Promise<void> }) | null = null;
+
+  constructor() {
+    this.overworld = new Overworld({
+      onStep: () => this.onStep(),
+      onEncounterTile: () => this.onEncounterTile(),
+      onExit: (to, ent) => void this.onExit(to, ent),
+      onDoor: (to) => void this.goto(to),
+      onInteract: (e) => void this.interact(e),
+      onTrainerSight: (e) => void this.trainerSight(e),
+    });
+    this.bindTitle();
+    requestAnimationFrame((t) => this.loop(t));
+  }
+
+  /* ---------------- écran titre ---------------- */
+  private bindTitle() {
+    const titleEl = $('#title');
+    const cont = titleEl.querySelector<HTMLButtonElement>('[data-act="continue"]')!;
+    const nw = titleEl.querySelector<HTMLButtonElement>('[data-act="new"]')!;
+    const inst = titleEl.querySelector<HTMLButtonElement>('[data-act="install"]')!;
+    const hint = $('#title-hint');
+
+    if (hasSave()) cont.hidden = false;
+    hint.textContent = 'Astuce : « Partager → Sur l’écran d’accueil » (iOS) ou « Installer l’application » (Android) pour jouer hors-ligne.';
+
+    addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      this.installPrompt = e as Event & { prompt(): Promise<void> };
+      inst.hidden = false;
+    });
+    inst.onclick = async () => { await this.installPrompt?.prompt(); inst.hidden = true; };
+
+    cont.onclick = () => { audio.unlock(); audio.sfx('select'); void this.continueGame(); };
+    nw.onclick = async () => {
+      audio.unlock(); audio.sfx('select');
+      if (hasSave()) {
+        const c = await ask('Une sauvegarde existe déjà. Elle sera écrasée.', ['Continuer quand même', 'Annuler']);
+        if (c === 1) return;
+        deleteSave();
+      }
+      void this.newGame();
+    };
+  }
+
+  private async continueGame() {
+    if (!loadGame()) { await say('Sauvegarde illisible.'); return; }
+    audio.setMuted(state.muted);
+    $('#title').hidden = true;
+    setHudVisible(true);
+    await this.goto(state.zone, { x: state.x, y: state.y, facing: state.facing, silent: true });
+  }
+
+  private async newGame() {
+    $('#title').hidden = true;
+    this.mode = 'busy';
+    const name = await promptText('Comment t’appelles-tu ?', 'Ton prénom', 'Sacha', 12);
+    state.reset(name || 'Sacha');
+    await say([
+      `Pr. Ombelle : Bonjour ${state.name} ! Bienvenue dans la région de Valmore.`,
+      'Pr. Ombelle : Ici, les dresseurs voyagent avec des créatures et défient les 8 Arènes avant d’affronter la Ligue.',
+      'Pr. Ombelle : Choisis ton premier compagnon. Ce choix te suivra très loin…',
+    ]);
+    await this.chooseStarter();
+    await say([
+      `Pr. Ombelle : Excellent choix ! Voici 5 Sphères et 3 Potions.`,
+      'Pr. Ombelle : Direction le nord ! Sérènis et sa première Arène t’attendent.',
+      `Pr. Ombelle : Ah, et ${RIVAL_NAME} est parti avant toi. Vous vous croiserez, c’est certain.`,
+    ]);
+    setHudVisible(true);
+    saveGame();
+    await this.goto(START_ZONE, { silent: false });
+  }
+
+  private chooseStarter(): Promise<void> {
+    const opts: [string, string][] = [
+      ['brasillon', 'Feu — évolue en Feu/Dragon'],
+      ['ondulin', 'Eau — évolue en Eau/Spectre'],
+      ['germinuit', 'Plante — évolue en Plante/Ténèbres'],
+    ];
+    return new Promise((resolve) => {
+      let chosen = false;
+      const open = () => openOverlay('Choisis ton starter', (body, api) => {
+        for (const [id, sub] of opts) {
+          const sp = species(id);
+          const c = document.createElement('button');
+          c.className = 'card';
+          c.append(portrait(id));
+          const g = document.createElement('div');
+          g.className = 'grow';
+          g.innerHTML = `<div class="row1"><span class="nm">${sp.name}</span></div>
+            <div class="sub">${sub}</div><div class="sub">${sp.flavor}</div>`;
+          c.append(g);
+          c.onclick = async () => {
+            const conf = await ask(`Prendre ${sp.name} ?`, ['Oui !', 'Non, voir les autres']);
+            if (conf === 1) return;
+            chosen = true;
+            state.giveStarter(id);
+            state.see(id);
+            audio.sfx('catch');
+            api.close();
+            resolve();
+          };
+          body.append(c);
+        }
+      }, () => { if (!chosen) setTimeout(open, 0); });   // choix obligatoire
+      open();
+    });
+  }
+
+  /* ---------------- navigation ---------------- */
+  private hiddenSet(): Set<string> {
+    const s = new Set<string>();
+    for (const k of Object.keys(state.flags)) if (k.startsWith('rm:') && state.flags[k]) s.add(k.slice(3));
+    return s;
+  }
+  private beatenSet(): Set<string> {
+    const s = new Set<string>();
+    for (const k of Object.keys(state.flags)) if (k.startsWith('tr:') && state.flags[k]) s.add(k.slice(3));
+    return s;
+  }
+
+  private resolveSpawn(target: GameMap, fromId: string | null): { pos: [number, number]; facing: number } {
+    if (fromId) {
+      const key = 'from:' + fromId;
+      if (target.spawns[key]) {
+        const ex = target.ents.find((e) => e.kind === 'exit' && e.to === fromId);
+        const dirFace: Record<string, number> = { n: 0, s: 2, e: 1, w: 3 };
+        return { pos: target.spawns[key], facing: ex && ex.kind === 'exit' ? dirFace[ex.dir] ?? 0 : 0 };
+      }
+      const door = target.ents.find((e) => e.kind === 'door' && e.to === fromId);
+      if (door) return { pos: [door.x, door.y + 1], facing: 0 };
+    }
+    return { pos: target.spawns.default ?? [Math.floor(target.w / 2), Math.floor(target.h / 2)], facing: 0 };
+  }
+
+  async goto(id: string, opts: { x?: number; y?: number; facing?: number; silent?: boolean } = {}) {
+    const prev = this.map?.id ?? null;
+    this.mode = 'busy';
+    await fade(true, 260);
+    const target = getMap(id);
+    let pos: [number, number], facing: number;
+    if (opts.x !== undefined && opts.y !== undefined) { pos = [opts.x, opts.y]; facing = opts.facing ?? 0; }
+    else ({ pos, facing } = this.resolveSpawn(target, prev));
+
+    this.map = target;
+    this.overworld.load(target, pos, facing, this.hiddenSet(), this.beatenSet());
+    state.zone = id; state.x = pos[0]; state.y = pos[1]; state.facing = facing;
+    this.playMapMusic();
+    this.mode = 'overworld';
+    setHudVisible(true);
+    await fade(false, 260);
+    if (!opts.silent) this.banner(ZONE[target.zoneId]?.intro && target.zoneId === target.id ? ZONE[target.zoneId].intro! : target.name);
+    await this.zoneScript(target);
+  }
+
+  /** Musique correspondant à la carte courante. */
+  private playMapMusic() {
+    const m = this.map;
+    if (m.music === 'arene' || m.music === 'boss') audio.play(m.music);
+    else audio.playBiome(m.biome);
+  }
+
+  private banner(text: string) {
+    const b = $('#loc-banner');
+    b.querySelector('span')!.textContent = text;
+    b.classList.add('show');
+    setTimeout(() => b.classList.remove('show'), 2200);
+  }
+
+  /** Scènes déclenchées à l'entrée d'une zone. */
+  private async zoneScript(map: GameMap) {
+    const ev = RIVAL_EVENTS.find((r) => r.zone === map.id);
+    if (ev && !state.flag(ev.flag)) {
+      state.setFlag(ev.flag);
+      this.mode = 'busy';
+      await say([
+        `${RIVAL_NAME} : Tiens ! Je me disais bien que je te croiserais ici.`,
+        `${RIVAL_NAME} : Montre-moi où tu en es. Pas de quartier !`,
+      ]);
+      const out = await this.battle({
+        kind: 'trainer', biome: map.biome, foeTeam: makeTeam(rivalTeam(ev.lv, ev.extras)),
+        trainerName: RIVAL_NAME, money: ev.lv * 60, canRun: false, canCatch: false,
+      });
+      if (out === 'win') await say(`${RIVAL_NAME} : Pas mal… vraiment pas mal. On se revoit plus loin !`);
+      this.mode = 'overworld';
+    }
+    if (map.id === 'sommet-cendre' && !state.flag('summit_seen')) {
+      state.setFlag('summit_seen');
+      await say('Le vent tombe d’un coup. Une silhouette immobile vous attend au bord du cratère.');
+    }
+  }
+
+  private async onExit(to: string, ent: Ent) {
+    if (ent.kind !== 'exit') return;
+    const link: Link = ent.link;
+    if (link.needBadge && state.badgeCount < link.needBadge) {
+      this.overworld.pushBack();
+      await say(link.block ?? 'Le passage est bloqué.');
+      return;
+    }
+    if (link.needFlag && !state.flag(link.needFlag)) {
+      this.overworld.pushBack();
+      await say(link.block ?? 'Le passage est bloqué.');
+      return;
+    }
+    await this.goto(to);
+  }
+
+  /* ---------------- pas & rencontres ---------------- */
+  private onStep() {
+    state.steps++;
+    if (state.repel > 0) state.repel--;
+    state.x = this.overworld.px; state.y = this.overworld.py; state.facing = this.overworld.facing;
+  }
+
+  private onEncounterTile() {
+    const z = ZONE[this.map.zoneId];
+    if (!z?.enc?.length) return;
+    if (Math.random() > 0.115) return;
+
+    // Légendaire itinérant (post-Ligue)
+    const leg = STATIC_ENCOUNTERS.find((s) => s.zone === this.map.id && !state.flag(s.flag));
+    if (leg && state.flag('champion') && Math.random() < 0.05) {
+      state.setFlag(leg.flag);
+      void this.legendary(leg.sp, leg.lv, leg.text);
+      return;
+    }
+
+    const lead = state.healthyParty[0];
+    const total = z.enc.reduce((a, e) => a + e.w, 0);
+    let r = Math.random() * total;
+    let pick: Enc = z.enc[0];
+    for (const e of z.enc) { r -= e.w; if (r <= 0) { pick = e; break; } }
+    const lv = pick.min + Math.floor(Math.random() * (pick.max - pick.min + 1));
+    if (state.repel > 0 && lead && lv < lead.lv) return;
+    audio.sfx('encounter');
+    void this.wild(pick.sp, lv);
+  }
+
+  private async legendary(sp: string, lv: number, text: string) {
+    this.mode = 'busy';
+    await say(text);
+    await this.battle({
+      kind: 'boss', biome: this.map.biome, foeTeam: [createMon(sp, lv, { metAt: this.map.name })],
+      trainerName: species(sp).name, canRun: true, canCatch: true, music: 'boss',
+    });
+    this.mode = 'overworld';
+  }
+
+  private async wild(sp: string, lv: number) {
+    this.mode = 'busy';
+    const mon = createMon(sp, lv, { metAt: this.map.name });
+    await this.battle({ kind: 'wild', biome: this.map.biome, foeTeam: [mon], canRun: true, canCatch: true });
+    this.mode = 'overworld';
+  }
+
+  /* ---------------- combats ---------------- */
+  private async battle(cfg: BattleConfig, onLose?: () => Promise<void>): Promise<'win' | 'lose' | 'run' | 'caught'> {
+    this.mode = 'battle';
+    setHudVisible(false);
+    await fade(true, 220);
+    await fade(false, 1);
+    const out = await this.battleUI.run(cfg);
+    if (out.caught) {
+      const where = state.party.length <= 6 ? '' : ' (envoyé au PC)';
+      toast(`${nameOf(out.caught)} rejoint l’équipe${where} !`, 2200);
+    }
+    await fade(true, 220);
+    this.mode = 'overworld';
+    setHudVisible(true);
+    this.playMapMusic();
+    await fade(false, 240);
+    if (out.result === 'lose') {
+      if (onLose) await onLose();
+      await this.blackout();
+    }
+    return out.result;
+  }
+
+  private async blackout() {
+    this.mode = 'busy';
+    const lost = Math.floor(state.money / 2);
+    state.money -= lost;
+    await say([
+      'Vous n’avez plus aucune créature en état de combattre…',
+      `Vous rentrez précipitamment au Centre de Soins. (−${lost} ¤)`,
+    ]);
+    state.healParty();
+    await this.goto(`in:${state.lastCenter}:center`);
+    this.mode = 'overworld';
+  }
+
+  private async trainerSight(ent: Ent & { kind: 'trainer' }) {
+    const key = entKey(this.map, ent);
+    if (state.flag('tr:' + key)) return;
+    this.mode = 'busy';
+    audio.sfx('select');
+    this.overworld.approach(ent);
+    await say(`${ent.cls} ${ent.name} : ${ent.taunt}`);
+    await this.runTrainer(ent, key);
+  }
+
+  private async runTrainer(ent: Ent & { kind: 'trainer' }, key: string) {
+    const out = await this.battle({
+      kind: 'trainer', biome: this.map.biome, foeTeam: makeTeam(ent.team),
+      trainerName: `${ent.cls} ${ent.name}`, money: ent.money, canRun: false, canCatch: false,
+    });
+    if (out === 'win') {
+      state.setFlag('tr:' + key);
+      this.overworld.markBeaten(ent);
+      await say(`${ent.cls} ${ent.name} : ${ent.beaten}`);
+      saveGame();
+    }
+    this.mode = 'overworld';
+  }
+
+  private async gymBattle(gymId: string) {
+    const gym = GYM[gymId];
+    this.mode = 'busy';
+    await say(`${gym.leader} : ${gym.intro}`);
+    const out = await this.battle({
+      kind: 'gym', biome: 'interieur', foeTeam: makeTeam(gym.team),
+      trainerName: gym.leader, money: gym.money, canRun: false, canCatch: false, music: 'arene',
+    }, async () => { await say(`${gym.leader} : ${gym.lose}`); });
+    if (out === 'win') {
+      state.giveBadge(gymId);
+      audio.sfx('badge');
+      await say([`${gym.leader} : ${gym.win}`, `Vous recevez le ${gym.badge.name} ${gym.badge.icon} !`]);
+      if (gym.order === 8) await say('Les 8 badges de Valmore ! La Route Victoire s’ouvre au nord de Nyxhaven.');
+      if (gym.order === 16) await say('16 badges. Le Mont Cendre n’a plus de raison de vous refuser l’entrée.');
+      saveGame();
+    }
+    this.mode = 'overworld';
+  }
+
+  private async bossBattle(bossId: string) {
+    const boss = bossId === FINAL_BOSS.id ? FINAL_BOSS : LEAGUE.find((b) => b.id === bossId)!;
+    this.mode = 'busy';
+    await say(`${boss.name} : ${boss.intro}`);
+    const isFinal = bossId === FINAL_BOSS.id;
+    const out = await this.battle({
+      kind: isFinal ? 'boss' : 'league', biome: isFinal ? 'neige' : 'interieur',
+      foeTeam: makeTeam(boss.team), trainerName: boss.name, money: boss.money,
+      canRun: false, canCatch: false, music: isFinal ? 'boss' : 'arene',
+    }, async () => { await say(`${boss.name} : ${boss.lose}`); });
+    if (out === 'win') {
+      state.setFlag('boss_' + boss.id);
+      await say(`${boss.name} : ${boss.win}`);
+      if (boss.id === 'champ') await this.becomeChampion();
+      if (isFinal) {
+        audio.play('victoire');
+        await say([
+          'Le sommet du Mont Cendre est à vous.',
+          'Émeric vous tend la main, sans un mot, puis redescend le sentier.',
+          '— Fin du post-game. Merci d’avoir joué à PokeLike ! —',
+        ]);
+      }
+      saveGame();
+    }
+    this.mode = 'overworld';
+  }
+
+  private async becomeChampion() {
+    state.setFlag('champion');
+    state.addItem('passeorsyn');
+    audio.play('victoire');
+    await say([
+      `Vous êtes intronisé Maître de la Ligue de Valmore, ${state.name} !`,
+      'Pr. Ombelle : Je savais que tu y arriverais. Mais l’aventure ne s’arrête pas là.',
+      'Pr. Ombelle : Tiens, le Passe d’Orsyn. Un ferry part de Port-Marée vers une seconde région.',
+      'Pr. Ombelle : Huit nouvelles Arènes t’y attendent… et tout au bout, le Mont Cendre.',
+    ]);
+    state.healParty();
+    saveGame();
+    await this.goto('plateau-ligue');
+  }
+
+  /* ---------------- interactions ---------------- */
+  private async interact(e: Ent) {
+    switch (e.kind) {
+      case 'sign':
+        await say(e.text);
+        break;
+      case 'npc':
+        this.mode = 'busy';
+        await say(e.lines);
+        this.mode = 'overworld';
+        break;
+      case 'item': {
+        const key = entKey(this.map, e);
+        state.addItem(e.itemId);
+        state.setFlag('rm:' + key);
+        this.overworld.removeEnt(key);
+        audio.sfx('item');
+        await say(`Vous trouvez ${getItem(e.itemId).name} !`);
+        break;
+      }
+      case 'heal': {
+        this.mode = 'busy';
+        const c = await ask('Infirmière : Bonjour ! Je soigne votre équipe ?', ['Oui, merci', 'Non merci']);
+        if (c === 0) {
+          audio.sfx('heal');
+          state.healParty();
+          state.lastCenter = this.map.zoneId;
+          saveGame();
+          await say('Infirmière : Voilà, votre équipe est en pleine forme ! Bonne route.');
+        }
+        this.mode = 'overworld';
+        break;
+      }
+      case 'shop':
+        this.mode = 'busy';
+        openShop(e.stock, () => { this.mode = 'overworld'; });
+        break;
+      case 'pc':
+        this.mode = 'busy';
+        openPC(() => { this.mode = 'overworld'; });
+        break;
+      case 'trainer': {
+        const key = entKey(this.map, e);
+        if (state.flag('tr:' + key)) { await say(`${e.cls} ${e.name} : ${e.beaten}`); return; }
+        this.mode = 'busy';
+        await say(`${e.cls} ${e.name} : ${e.taunt}`);
+        await this.runTrainer(e, key);
+        break;
+      }
+      case 'leader': {
+        const gym = GYM[e.gymId];
+        if (state.hasBadge(e.gymId)) {
+          const c = await ask(`${gym.leader} : Tu veux remettre ça ?`, ['Combattre à nouveau', 'Une autre fois']);
+          if (c === 0) await this.gymBattle(e.gymId);
+          return;
+        }
+        await this.gymBattle(e.gymId);
+        break;
+      }
+      case 'boss': {
+        if (state.flag('boss_' + e.bossId)) {
+          const boss = e.bossId === FINAL_BOSS.id ? FINAL_BOSS : LEAGUE.find((b) => b.id === e.bossId)!;
+          const c = await ask(`${boss.name} : Encore un combat ?`, ['Oui', 'Non']);
+          if (c === 0) await this.bossBattle(e.bossId);
+          return;
+        }
+        await this.bossBattle(e.bossId);
+        break;
+      }
+    }
+  }
+
+  /** Aides de débogage exposées sur window.pokelike. */
+  debugParty(): string[] {
+    return state.party.map((m) => `${nameOf(m)} N.${m.lv} ${m.hp}/${maxHp(m)}`);
+  }
+  debugWild(sp: string, lv: number) { void this.wild(sp, lv); }
+  /** Démarrage express (tests) : saute l'intro. */
+  async newGameQuick(name: string, starter: string) {
+    $('#title').hidden = true;
+    state.reset(name);
+    state.giveStarter(starter);
+    setHudVisible(true);
+    await this.goto(START_ZONE, { silent: true });
+  }
+  debugGoto(id: string) { void this.goto(id); }
+  debugGym(id: string) { void this.gymBattle(id); }
+  debugGive(sp: string, lv: number) { state.addMon(createMon(sp, lv, { metAt: 'Test' })); }
+  debugBadges(): string[] { return state.badges; }
+  debugGiveBadge(id: string) { state.giveBadge(id); }
+  debugSave() { saveGame(); }
+  debugAllMapIds(): string[] {
+    const ids: string[] = [];
+    for (const z of Object.values(ZONE)) {
+      ids.push(z.id);
+      if (z.center) ids.push(`in:${z.id}:center`);
+      if (z.shop) ids.push(`in:${z.id}:shop`);
+      (z.houses ?? []).forEach((_, i) => ids.push(`in:${z.id}:house${i}`));
+    }
+    for (const g of GYMS) ids.push(`gym:${g.id}`);
+    for (let i = 0; i < LEAGUE.length; i++) ids.push(`league:${i}`);
+    return ids;
+  }
+  /** Déclenche l'interaction avec la première entité du type demandé. */
+  debugInteract(kind: string): boolean {
+    const e = this.map.ents.find((x) => x.kind === kind);
+    if (!e) return false;
+    void this.interact(e);
+    return true;
+  }
+  debugMode() { return this.mode; }
+  /** Tente la sortie vers une zone donnée (test du verrouillage par badge). */
+  debugTryExit(to: string): boolean {
+    const e = this.map.ents.find((x) => x.kind === 'exit' && x.to === to);
+    if (!e) return false;
+    this.overworld.place(e.x, e.y);
+    void this.onExit(to, e);
+    return true;
+  }
+  debugBuildMap(id: string) {
+    const m = getMap(id);
+    return { w: m.w, h: m.h, ents: m.ents.length };
+  }
+
+  /* ---------------- boucle ---------------- */
+  private loop(now: number) {
+    try { this.step(now); }
+    catch (err) { console.error('Erreur dans la boucle de jeu', err); }
+    requestAnimationFrame((t) => this.loop(t));
+  }
+
+  private step(now: number) {
+    const dt = Math.min(0.05, (now - this.last) / 1000);
+    this.last = now;
+
+    if (this.mode !== 'title') state.playTime += dt;
+
+    if ((this.mode === 'overworld' || this.mode === 'busy') && this.overworld.loaded) {
+      const blocked = ui.dialogueOpen || ui.overlayOpen || this.mode === 'busy';
+      this.overworld.paused = blocked;
+      const dir = blocked ? { x: 0, y: 0 } : this.input.dir();
+      this.overworld.update(dt, dir, this.input.running(), this.renderer.camera);
+      this.renderer.render(this.overworld.scene);
+
+      if (this.input.justPressed('a')) {
+        if (ui.dialogueOpen) advanceDialogue();
+        else if (!blocked) {
+          const front = this.overworld.front();
+          if (front) { audio.sfx('select'); void this.interact(front); }
+        }
+      }
+      if (this.input.justPressed('menu') && !blocked) {
+        audio.sfx('select');
+        this.mode = 'busy';
+        openMainMenu(() => { this.mode = 'overworld'; });
+      }
+      if (this.input.justPressed('b') && ui.dialogueOpen) advanceDialogue();
+    } else if (this.mode === 'battle') {
+      this.battleScene.update(dt, this.renderer.camera);
+      this.renderer.render(this.battleScene.scene);
+    } else {
+      this.renderer.render(this.overworld.scene);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+const game = new Game();
+// Exposé pour le débogage et les tests automatisés.
+(window as unknown as { pokelike: Game }).pokelike = game;
+
+// Déverrouillage audio au premier contact (politique navigateurs).
+const unlock = () => { audio.unlock(); removeEventListener('pointerdown', unlock); };
+addEventListener('pointerdown', unlock);
+
+// Sauvegarde automatique quand l'appli passe en arrière-plan.
+addEventListener('visibilitychange', () => { if (document.hidden && state.party.length) saveGame(); });
+addEventListener('pagehide', () => { if (state.party.length) saveGame(); });
+
+// Évite le zoom double-tap sur iOS.
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+
+void fmtTime; void openParty; void RNG; void THREE;

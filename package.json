@@ -1,0 +1,27 @@
+{
+  "name": "pokelike",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "PokeLike - RPG de monstres 3D installable (PWA)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "icons": "node scripts/gen-icons.mjs",
+    "test:smoke": "node scripts/smoke.mjs",
+    "test:battle": "node scripts/test-battle.mjs",
+    "test:flow": "node scripts/test-flow.mjs",
+    "test": "npm run build && npm run test:smoke && npm run test:battle && npm run test:flow"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "playwright": "^1.62.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vite-plugin-pwa": "^0.20.5"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  }
+}
