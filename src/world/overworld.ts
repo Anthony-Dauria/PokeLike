@@ -2,25 +2,80 @@ import * as THREE from 'three';
 import { T, WALKABLE, type Ent, type GameMap } from './mapgen';
 import { animateRig, buildHuman, type CreatureRig } from '../creature/model';
 import { RNG, hashStr } from '../engine/rng';
-import { addLights, disposeObject, disposeScene } from '../engine/renderer';
+import { addLights, addSky, disposeObject, disposeScene, toonGradient, uTime, windify, type SceneLights } from '../engine/renderer';
 
 export const DIRV: [number, number][] = [[0, 1], [-1, 0], [0, -1], [1, 0]]; // S, O, N, E
 
-interface Palette { ground: number; path: number; water: number; prop: 'tree' | 'rock' | 'cactus' | 'snowtree' | 'crystal'; propColor: number; trunk: number; grass: number; sky: number; fog: number; flower: number[]; light?: number }
+type PropKind = 'tree' | 'rock' | 'cactus' | 'snowtree' | 'crystal';
+
+interface Palette {
+  ground: number; ground2: number; path: number; water: number; waterDeep: number;
+  prop: PropKind; propColor: number; propColor2: number; trunk: number; grass: number; grass2: number;
+  skyTop: number; skyMid: number; skyLow: number; fog: number; flower: number[];
+  light?: number; clouds?: boolean;
+}
 
 const PAL: Record<string, Palette> = {
-  plaine: { ground: 0x5fa851, path: 0xc9b184, water: 0x3d8fd4, prop: 'tree', propColor: 0x2f7a3c, trunk: 0x6b4a2f, grass: 0x3f8c3a, sky: 0x9ed2ff, fog: 0xbfe0f5, flower: [0xff7ba0, 0xffd166, 0xa88fff] },
-  foret: { ground: 0x3f8f47, path: 0xa8925f, water: 0x357fb8, prop: 'tree', propColor: 0x1f5f30, trunk: 0x54381f, grass: 0x2d7134, sky: 0x8fc7e8, fog: 0x9fc9b8, flower: [0xffe083, 0xff9ecb, 0xc0ff8f] },
-  montagne: { ground: 0x8a9078, path: 0xb3a68a, water: 0x4a8fc0, prop: 'rock', propColor: 0x77786e, trunk: 0x55564f, grass: 0x6d8a55, sky: 0xa9c8e0, fog: 0xc0cbd6, flower: [0xffd9a0, 0xdedede, 0xffb3b3] },
-  plage: { ground: 0xe3d3a0, path: 0xd8c48a, water: 0x2f9fd8, prop: 'tree', propColor: 0x3f9a55, trunk: 0x8a6a3f, grass: 0x8fbf5f, sky: 0x8ed8ff, fog: 0xcfeaf7, flower: [0xffd166, 0xff9f6e, 0xfff0a0] },
-  desert: { ground: 0xe0c07a, path: 0xcaa860, water: 0x3fa0c8, prop: 'cactus', propColor: 0x4f8f4a, trunk: 0x9a7a45, grass: 0xb9a55c, sky: 0xffd9a0, fog: 0xf0d5a0, flower: [0xff8f5e, 0xffe0a0, 0xd8a0ff] },
-  neige: { ground: 0xe6eef7, path: 0xc9d6e4, water: 0x6fb8e0, prop: 'snowtree', propColor: 0xdfe9f2, trunk: 0x4a5a6a, grass: 0xbcd0e0, sky: 0xdfeeff, fog: 0xe8f2fb, flower: [0xa0d8ff, 0xffffff, 0xcfe8ff] },
-  volcan: { ground: 0x6b4b45, path: 0x3f2e2c, water: 0xff6a2a, prop: 'rock', propColor: 0x4a3532, trunk: 0x2f2220, grass: 0x8a4a35, sky: 0xffa070, fog: 0xd07a55, flower: [0xff6a3a, 0xffc04a, 0xff9060] },
-  marais: { ground: 0x4f6b4a, path: 0x7a7150, water: 0x3f5a4a, prop: 'tree', propColor: 0x3a5a3a, trunk: 0x3f3226, grass: 0x486b40, sky: 0x8fa8a0, fog: 0x7f958c, flower: [0xa0ff8f, 0xd0c060, 0x9f8fff] },
-  ville: { ground: 0x77a75f, path: 0xcfc3aa, water: 0x3d8fd4, prop: 'tree', propColor: 0x2f7a3c, trunk: 0x6b4a2f, grass: 0x4f8f45, sky: 0x9ed2ff, fog: 0xc5dff0, flower: [0xff7ba0, 0xffd166, 0xa88fff] },
-  grotte: { ground: 0x5d5c6b, path: 0x6d6c7b, water: 0x3f5f8f, prop: 'crystal', propColor: 0x7a7690, trunk: 0x3a3945, grass: 0x53645a, sky: 0x1a1c26, fog: 0x2b2f40, flower: [0x8fd0ff, 0xb0a0ff, 0x70e0c0], light: 0xa8bcd8 },
-  sommet: { ground: 0xe6eef7, path: 0xc9d6e4, water: 0x6fb8e0, prop: 'rock', propColor: 0x8d97a8, trunk: 0x4a5a6a, grass: 0xbcd0e0, sky: 0xcfe4ff, fog: 0xdfeaf7, flower: [0xa0d8ff, 0xffffff, 0xcfe8ff] },
-  interieur: { ground: 0xd6ac82, path: 0xc39a6f, water: 0x3d8fd4, prop: 'rock', propColor: 0x8b6b52, trunk: 0x6b4a2f, grass: 0x7a9a5a, sky: 0x232838, fog: 0x232838, flower: [0xffd166, 0xff9ecb, 0xa0d8ff], light: 0xffeccf },
+  plaine: {
+    ground: 0x63ad55, ground2: 0x4f9a48, path: 0xcdb489, water: 0x3f95d8, waterDeep: 0x1f5f9e,
+    prop: 'tree', propColor: 0x2f8140, propColor2: 0x3f9a4c, trunk: 0x6d4b30, grass: 0x6cc255, grass2: 0x86d067,
+    skyTop: 0x3f8fd8, skyMid: 0x9ed6ff, skyLow: 0xd8f0ff, fog: 0xc4e4f7, flower: [0xff7ba0, 0xffd166, 0xa88fff], clouds: true,
+  },
+  foret: {
+    ground: 0x3f8f47, ground2: 0x347b3d, path: 0xab9563, water: 0x387fb8, waterDeep: 0x1e5480,
+    prop: 'tree', propColor: 0x1f6234, propColor2: 0x2b7a3e, trunk: 0x543a20, grass: 0x59a94b, grass2: 0x6fbc5c,
+    skyTop: 0x4a92c8, skyMid: 0x9ccbe8, skyLow: 0xd6ecdc, fog: 0xa8cebb, flower: [0xffe083, 0xff9ecb, 0xc0ff8f], clouds: true,
+  },
+  montagne: {
+    ground: 0x8d947c, ground2: 0x7c8570, path: 0xb7ab8f, water: 0x4d95c6, waterDeep: 0x27618f,
+    prop: 'rock', propColor: 0x7b7c72, propColor2: 0x8b8c82, trunk: 0x55564f, grass: 0x6d8a55, grass2: 0x7c9a60,
+    skyTop: 0x5b9bd0, skyMid: 0xaacce4, skyLow: 0xe0eaf2, fog: 0xc6d2dc, flower: [0xffd9a0, 0xdedede, 0xffb3b3], clouds: true,
+  },
+  plage: {
+    ground: 0xe6d7a6, ground2: 0xd9c894, path: 0xdcc98f, water: 0x2fa6de, waterDeep: 0x1372a8,
+    prop: 'tree', propColor: 0x3f9a55, propColor2: 0x4fae62, trunk: 0x8d6c40, grass: 0xa8d472, grass2: 0xb8de83,
+    skyTop: 0x3fa5e8, skyMid: 0x9fe0ff, skyLow: 0xe4f8ff, fog: 0xd4eef8, flower: [0xffd166, 0xff9f6e, 0xfff0a0], clouds: true,
+  },
+  desert: {
+    ground: 0xe4c67e, ground2: 0xd7b76e, path: 0xcdab63, water: 0x43a6cc, waterDeep: 0x1f7396,
+    prop: 'cactus', propColor: 0x4f8f4a, propColor2: 0x5c9d55, trunk: 0x9a7a45, grass: 0xbca85e, grass2: 0xc7b46a,
+    skyTop: 0x7fb6e0, skyMid: 0xffdda8, skyLow: 0xffeccd, fog: 0xf0d7a6, flower: [0xff8f5e, 0xffe0a0, 0xd8a0ff], clouds: true,
+  },
+  neige: {
+    ground: 0xeaf1f9, ground2: 0xdde7f2, path: 0xccd8e6, water: 0x74bce2, waterDeep: 0x3d87b8,
+    prop: 'snowtree', propColor: 0x27563f, propColor2: 0x2f6449, trunk: 0x4a5a6a, grass: 0xc2d4e2, grass2: 0xd0dfeb,
+    skyTop: 0x7fa8cc, skyMid: 0xd2e6f8, skyLow: 0xf2f8ff, fog: 0xe6f0fa, flower: [0xa0d8ff, 0xffffff, 0xcfe8ff], clouds: true,
+  },
+  sommet: {
+    ground: 0xe9f0f8, ground2: 0xd8e3ef, path: 0xc7d4e2, water: 0x74bce2, waterDeep: 0x3d87b8,
+    prop: 'rock', propColor: 0x8b96a6, propColor2: 0x99a3b2, trunk: 0x4a5a6a, grass: 0xc0d2e0, grass2: 0xcedde9,
+    skyTop: 0x2f5f96, skyMid: 0x9dc4e8, skyLow: 0xe8f2fb, fog: 0xdae8f5, flower: [0xa0d8ff, 0xffffff, 0xcfe8ff], clouds: true,
+  },
+  volcan: {
+    ground: 0x6f4c44, ground2: 0x5d4039, path: 0x3f2e2c, water: 0xff6a2a, waterDeep: 0xc23c10,
+    prop: 'rock', propColor: 0x4a3532, propColor2: 0x59403c, trunk: 0x2f2220, grass: 0x8a4a35, grass2: 0x9a5a40,
+    skyTop: 0x7a3a4a, skyMid: 0xe07a52, skyLow: 0xffc79a, fog: 0xd08a62, flower: [0xff6a3a, 0xffc04a, 0xff9060],
+  },
+  marais: {
+    ground: 0x536f4d, ground2: 0x466040, path: 0x7d7452, water: 0x3f5a4a, waterDeep: 0x263a30,
+    prop: 'tree', propColor: 0x3a5a3a, propColor2: 0x466846, trunk: 0x3f3226, grass: 0x6d9455, grass2: 0x7fa462,
+    skyTop: 0x5f7a76, skyMid: 0x93aaa2, skyLow: 0xc4d2c8, fog: 0x8ba396, flower: [0xa0ff8f, 0xd0c060, 0x9f8fff],
+  },
+  ville: {
+    ground: 0x79ab60, ground2: 0x679a53, path: 0xd3c6ac, water: 0x3f95d8, waterDeep: 0x1f5f9e,
+    prop: 'tree', propColor: 0x2f8140, propColor2: 0x3f9a4c, trunk: 0x6d4b30, grass: 0x6ec257, grass2: 0x83d16a,
+    skyTop: 0x3f8fd8, skyMid: 0x9ed6ff, skyLow: 0xdcf1ff, fog: 0xcae5f6, flower: [0xff7ba0, 0xffd166, 0xa88fff], clouds: true,
+  },
+  grotte: {
+    ground: 0x6b6a7a, ground2: 0x5e5c6d, path: 0x7a7889, water: 0x3f5f8f, waterDeep: 0x243f66,
+    prop: 'crystal', propColor: 0x6f6c88, propColor2: 0x847fa4, trunk: 0x3a3945, grass: 0x5c6f63, grass2: 0x69806f,
+    skyTop: 0x0f1119, skyMid: 0x161a26, skyLow: 0x252c3d, fog: 0x2b3040, flower: [0x8fd0ff, 0xb0a0ff, 0x70e0c0], light: 0xbccbe0,
+  },
+  interieur: {
+    ground: 0xd8ae84, ground2: 0xc79a70, path: 0xc39a6f, water: 0x3d8fd4, waterDeep: 0x1f5f9e,
+    prop: 'rock', propColor: 0x8b6b52, propColor2: 0x9a7a60, trunk: 0x6b4a2f, grass: 0x7a9a5a, grass2: 0x86a565,
+    skyTop: 0x1d2130, skyMid: 0x232838, skyLow: 0x2b3142, fog: 0x232838, flower: [0xffd166, 0xff9ecb, 0xa0d8ff], light: 0xffeccf,
+  },
 };
 
 export interface OverworldHooks {
@@ -33,6 +88,21 @@ export interface OverworldHooks {
 }
 
 interface ActorView { ent: Ent; rig: CreatureRig }
+
+/* Bruit de valeur lissé, déterministe : relief doux du terrain. */
+function valueNoise(x: number, y: number, seed: number): number {
+  const h = (a: number, b: number) => {
+    let n = Math.imul(a * 374761393 + b * 668265263 + seed, 1274126177);
+    n = (n ^ (n >>> 13)) >>> 0;
+    return n / 4294967296;
+  };
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const s = (t: number) => t * t * (3 - 2 * t);
+  const u = s(xf), v = s(yf);
+  const a = h(xi, yi), b = h(xi + 1, yi), c = h(xi, yi + 1), d = h(xi + 1, yi + 1);
+  return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+}
 
 export class Overworld {
   scene = new THREE.Scene();
@@ -47,12 +117,13 @@ export class Overworld {
   private actors: ActorView[] = [];
   private removed = new Set<string>();
   private beaten = new Set<string>();
-  private water: THREE.Mesh[] = [];
-  private grassTuft: THREE.InstancedMesh | null = null;
+  private clouds: THREE.Object3D | null = null;
+  private lights: SceneLights | null = null;
   private clock = 0;
   private camTarget = new THREE.Vector3();
   paused = false;
   loaded = false;
+  shadows = true;
   hooks: OverworldHooks;
 
   constructor(hooks: OverworldHooks) {
@@ -69,15 +140,16 @@ export class Overworld {
     this.removed = hidden;
     this.beaten = beaten;
     this.scene = new THREE.Scene();
-    this.water = [];
-    this.grassTuft = null;
+    this.clouds = null;
     const pal = PAL[map.biome] ?? PAL.plaine;
-    this.scene.background = new THREE.Color(pal.sky);
-    this.scene.fog = new THREE.Fog(pal.fog, map.indoor ? 30 : 20, map.indoor ? 70 : 52);
-    addLights(this.scene, pal.light ?? pal.sky, pal.ground, map.indoor ? 0xfff0d8 : 0xffffff);
+    this.scene.fog = new THREE.Fog(map.indoor ? pal.fog : pal.skyLow, map.indoor ? 24 : 22, map.indoor ? 58 : 46);
+    addSky(this.scene, pal.skyTop, pal.skyMid, pal.skyLow, map.indoor ? 0.1 : 0.5);
+    this.lights = addLights(this.scene, pal.light ?? pal.skyMid, pal.ground, map.indoor ? 0xffeacb : 0xfff6e0, this.shadows);
 
     this.buildTerrain(map, pal);
     this.buildProps(map, pal);
+    if (!map.indoor) this.buildHorizon(map, pal);
+    if (pal.clouds && !map.indoor) this.buildClouds(map, pal);
     this.buildActors(map);
 
     this.player = buildHuman(0x2a7fd4, 0xf2c9a0, 0x2b1d16, 0xe8434e);
@@ -90,43 +162,110 @@ export class Overworld {
   }
 
   /* ---------------- terrain ---------------- */
-  private tileColor(t: number, pal: Palette, jitter: number): THREE.Color {
+  private tileColor(t: number, pal: Palette, jitter: number, patch = .5, checker = 0, accent?: number): THREE.Color {
     let base: number;
     switch (t) {
-      case T.CHEMIN: base = pal.path; break;
-      case T.SABLE: base = pal.ground; break;
-      case T.EAU: base = pal.water; break;
+      case T.CHEMIN: case T.SORTIE: base = pal.path; break;
+      case T.SABLE: base = pal.ground2; break;
+      case T.EAU: base = new THREE.Color(pal.waterDeep).multiplyScalar(.55).getHex(); break;
       case T.HERBE: base = pal.grass; break;
-      case T.TAPIS: base = pal.ground; break;
-      case T.SORTIE: base = pal.path; break;
-      case T.FLEUR: base = pal.ground; break;
-      default: base = pal.ground;
+      case T.TAPIS: {
+        // Damier d'intérieur, teinté par la couleur de l'Arène / du bâtiment.
+        const a = new THREE.Color(checker ? pal.ground : pal.ground2);
+        if (accent !== undefined) a.lerp(new THREE.Color(accent), checker ? .3 : .12);
+        return a.multiplyScalar(1 + (jitter - .5) * .05);
+      }
+      case T.FLEUR: base = pal.ground2; break;
+      default: base = -1;
     }
-    const c = new THREE.Color(base);
-    const k = 1 + (jitter - .5) * .12;
-    c.multiplyScalar(k);
+    // Les zones ouvertes fondent deux verts via un bruit doux : moins « damier ».
+    const c = base < 0
+      ? new THREE.Color(pal.ground).lerp(new THREE.Color(pal.ground2), patch)
+      : new THREE.Color(base);
+    c.multiplyScalar(1 + (jitter - .5) * .07);
     return c;
   }
 
   private buildTerrain(map: GameMap, pal: Palette) {
     const rng = new RNG(hashStr(map.id) + 5);
-    const n = map.w * map.h;
+    const seed = hashStr(map.id) & 0xffff;
+    const W = map.w, H = map.h;
+    const tile = (x: number, y: number) => (x < 0 || y < 0 || x >= W || y >= H ? T.OBSTACLE : map.tiles[y * W + x]);
+    const isFlat = (t: number) => t === T.CHEMIN || t === T.SORTIE || t === T.MUR || t === T.PORTE || t === T.COMPTOIR || t === T.TAPIS || t === T.EAU;
+
+    /* --- champ de hauteur aux coins, partagé entre tuiles voisines --- */
+    const amp = map.indoor ? 0 : map.biome === 'sommet' || map.biome === 'montagne' ? .5 : .34;
+    const CW = W + 1;
+    const corner = new Float32Array(CW * (H + 1));
+    for (let cy = 0; cy <= H; cy++) {
+      for (let cx = 0; cx <= W; cx++) {
+        let flat = false;
+        for (const [dx, dy] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
+          const t = tile(cx + dx, cy + dy);
+          if (isFlat(t)) { flat = true; break; }
+        }
+        if (flat || amp === 0) { corner[cy * CW + cx] = 0; continue; }
+        const n = valueNoise(cx * .28, cy * .28, seed) * .7 + valueNoise(cx * .09, cy * .09, seed + 7) * .3;
+        corner[cy * CW + cx] = n * amp;   // toujours ≥ 0 : le sol ne passe jamais sous le remplissage
+      }
+    }
+
+    /* --- occlusion douce près des obstacles --- */
+    const ao = (x: number, y: number) => {
+      let n = 0;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+        const t = tile(x + i, y + j);
+        if (t === T.OBSTACLE || t === T.MUR) n++;
+      }
+      return 1 - Math.min(n, 5) * .052;
+    };
+
+    /* --- couleur par tuile ; lissage aux coins UNIQUEMENT entre surfaces de même famille,
+           pour garder des chemins et des rives nets tout en fondant les nuances d'herbe --- */
+    const famille = (t: number) => (t === T.CHEMIN || t === T.SORTIE ? 0 : t === T.EAU ? 1 : t === T.HERBE ? 3 : 2);
+    const tileCol: THREE.Color[] = new Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const patch = valueNoise(x * .16, y * .16, seed + 31);
+      tileCol[y * W + x] = this.tileColor(map.tiles[y * W + x], pal, rng.next(), patch, (x + y) & 1, map.accent).multiplyScalar(ao(x, y));
+    }
+    const blended = (x: number, y: number, cx: number, cy: number, out: THREE.Color) => {
+      const here = tile(x, y);
+      // Le damier des intérieurs ne doit pas être lissé, sinon il disparaît.
+      if (here === T.TAPIS) return out.copy(tileCol[y * W + x]);
+      const fam = famille(here);
+      let r = 0, g = 0, b = 0, k = 0;
+      for (const [dx, dy] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
+        const tx = x + cx + dx, ty = y + cy + dy;
+        if (tx < 0 || ty < 0 || tx >= W || ty >= H) continue;
+        if (famille(map.tiles[ty * W + tx]) !== fam) continue;
+        const c = tileCol[ty * W + tx];
+        r += c.r; g += c.g; b += c.b; k++;
+      }
+      if (!k) out.copy(tileCol[y * W + x]);
+      else out.setRGB(r / k, g / k, b / k);
+      return out;
+    };
+
+    const n = W * H;
     const pos = new Float32Array(n * 4 * 3);
     const col = new Float32Array(n * 4 * 3);
     const idx = new Uint32Array(n * 6);
     let v = 0, f = 0;
-    for (let y = 0; y < map.h; y++) {
-      for (let x = 0; x < map.w; x++) {
-        const t = map.tiles[y * map.w + x];
-        const h = t === T.EAU ? -.16 : t === T.CHEMIN || t === T.SORTIE ? .015 : 0;
-        const c = this.tileColor(t, pal, rng.next());
+    const tmpCol = new THREE.Color();
+    const corners: [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const t = map.tiles[y * W + x];
+        // Seule l'eau descend : décaler les chemins créerait une fissure visible avec leurs voisins.
+        const flatY = t === T.EAU ? -.86 : null;   // lit du plan d'eau, bien en dessous
         const base = v * 3;
-        const corners: [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 1]];
         corners.forEach(([cx, cy], i) => {
+          const co = ((y + cy) * CW + (x + cx));
           pos[base + i * 3] = x - .5 + cx;
-          pos[base + i * 3 + 1] = h;
+          pos[base + i * 3 + 1] = flatY ?? corner[co];
           pos[base + i * 3 + 2] = y - .5 + cy;
-          col[base + i * 3] = c.r; col[base + i * 3 + 1] = c.g; col[base + i * 3 + 2] = c.b;
+          blended(x, y, cx, cy, tmpCol);
+          col[base + i * 3] = tmpCol.r; col[base + i * 3 + 1] = tmpCol.g; col[base + i * 3 + 2] = tmpCol.b;
         });
         idx[f] = v; idx[f + 1] = v + 2; idx[f + 2] = v + 1;
         idx[f + 3] = v; idx[f + 4] = v + 3; idx[f + 5] = v + 2;
@@ -138,19 +277,28 @@ export class Overworld {
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
-    this.scene.add(mesh);
+    const ground = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGradient() }));
+    ground.receiveShadow = true;
+    this.scene.add(ground);
 
-    // Terrain de remplissage : évite de voir le vide au-delà des bords.
-    const pad = map.biome === 'interieur' ? 8 : 70;
+    // Terrain de remplissage au-delà des bords, affleurant le sol.
+    const pad = map.biome === 'interieur' ? 8 : 60;
     const skirt = new THREE.Mesh(
-      new THREE.BoxGeometry(map.w + pad, 4, map.h + pad),
-      new THREE.MeshLambertMaterial({ color: new THREE.Color(pal.ground).multiplyScalar(map.biome === 'interieur' ? .55 : .82) }),
+      new THREE.BoxGeometry(W + pad, 4, H + pad),
+      new THREE.MeshToonMaterial({
+        // Autour d'un intérieur : un aplat sombre neutre qui se confond avec le vide.
+        color: map.biome === 'interieur'
+          ? new THREE.Color(pal.fog).multiplyScalar(.8)
+          : new THREE.Color(pal.ground).multiplyScalar(.86),
+        gradientMap: toonGradient(),
+      }),
     );
-    skirt.position.set(map.w / 2 - .5, -2.001, map.h / 2 - .5);   // sommet affleurant le sol
+    skirt.position.set(W / 2 - .5, -2.03, H / 2 - .5);
+    skirt.receiveShadow = true;
     this.scene.add(skirt);
   }
 
+  /* ---------------- décors ---------------- */
   private buildProps(map: GameMap, pal: Palette) {
     const rng = new RNG(hashStr(map.id) + 77);
     const tiles: Record<number, [number, number][]> = {};
@@ -159,157 +307,373 @@ export class Overworld {
       (tiles[t] ??= []).push([x, y]);
     }
     const dummy = new THREE.Object3D();
-    const inst = (geo: THREE.BufferGeometry, m: THREE.Material, count: number) => {
+    const tint = new THREE.Color();
+    const inst = (geo: THREE.BufferGeometry, m: THREE.Material, count: number, shadow = true) => {
       const im = new THREE.InstancedMesh(geo, m, count);
-      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.castShadow = shadow;
+      im.receiveShadow = shadow;
       this.scene.add(im);
       return im;
+    };
+    // Les géométries polyédriques (dodécaèdre, cône) sont déjà facettées : pas besoin de flatShading.
+    const toon = (c: number, o: THREE.MeshToonMaterialParameters = {}) => new THREE.MeshToonMaterial({ color: c, gradientMap: toonGradient(), ...o });
+    const vary = (im: THREE.InstancedMesh, i: number, a: number, b: number, k: number) => {
+      tint.setHex(a).lerp(new THREE.Color(b), k);
+      im.setColorAt(i, tint);
     };
 
     /* -- obstacles -- */
     const obs = tiles[T.OBSTACLE] ?? [];
     if (obs.length) {
-      if (pal.prop === 'rock' || pal.prop === 'crystal') {
-        const im = inst(new THREE.IcosahedronGeometry(.62, 0), new THREE.MeshLambertMaterial({ color: pal.propColor, flatShading: true }), obs.length);
+      if (pal.prop === 'crystal') {
+        // Parois de grotte : colonnes rocheuses hautes qui referment le cadre,
+        // avec quelques cristaux lumineux plantés dedans.
+        const col = inst(new THREE.DodecahedronGeometry(.72, 0), toon(0xffffff), obs.length);
+        const heights: number[] = [];
         obs.forEach(([x, y], i) => {
-          dummy.position.set(x, .3 + rng.next() * .25, y);
+          const h = 2.4 + rng.next() * 1.8;
+          heights.push(h);
+          dummy.position.set(x, h * .42, y);
+          dummy.rotation.set((rng.next() - .5) * .3, rng.next() * 6, (rng.next() - .5) * .3);
+          dummy.scale.set(.8 + rng.next() * .35, h * .55, .8 + rng.next() * .35);
+          dummy.updateMatrix(); col.setMatrixAt(i, dummy.matrix);
+          vary(col, i, pal.propColor, pal.propColor2, rng.next());
+        });
+        col.instanceMatrix.needsUpdate = true;
+        if (col.instanceColor) col.instanceColor.needsUpdate = true;
+
+        const gems = obs.filter(() => rng.next() < .45);
+        if (gems.length) {
+          const cr = inst(new THREE.ConeGeometry(.3, 1.15, 5), toon(pal.propColor2), gems.length);
+          const glow = inst(new THREE.OctahedronGeometry(.17, 0),
+            new THREE.MeshBasicMaterial({ color: 0xbfe4ff, transparent: true, opacity: .8 }), gems.length, false);
+          gems.forEach(([x, y], i) => {
+            const base = .5 + rng.next() * 1.4;
+            dummy.position.set(x + (rng.next() - .5) * .5, base, y + (rng.next() - .5) * .5);
+            dummy.rotation.set((rng.next() - .5) * .5, rng.next() * 6, (rng.next() - .5) * .5);
+            const s = .7 + rng.next() * .7;
+            dummy.scale.set(s, s, s);
+            dummy.updateMatrix(); cr.setMatrixAt(i, dummy.matrix);
+            dummy.position.set(dummy.position.x, base + .48 * s, dummy.position.z);
+            dummy.rotation.set(0, rng.next() * 6, 0);
+            dummy.scale.setScalar(s * .9);
+            dummy.updateMatrix(); glow.setMatrixAt(i, dummy.matrix);
+          });
+          cr.instanceMatrix.needsUpdate = true;
+          glow.instanceMatrix.needsUpdate = true;
+        }
+      } else if (pal.prop === 'rock') {
+        const im = inst(new THREE.DodecahedronGeometry(.62, 0), toon(0xffffff), obs.length);
+        obs.forEach(([x, y], i) => {
+          dummy.position.set(x, .28 + rng.next() * .22, y);
           dummy.rotation.set(rng.next(), rng.next() * 6, rng.next());
-          const s = .8 + rng.next() * .6;
-          dummy.scale.set(s, s * (pal.prop === 'crystal' ? 1.5 : .9), s);
+          const s = .82 + rng.next() * .55;
+          dummy.scale.set(s, s * .92, s);
           dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
+          vary(im, i, pal.propColor, pal.propColor2, rng.next());
         });
         im.instanceMatrix.needsUpdate = true;
+        if (im.instanceColor) im.instanceColor.needsUpdate = true;
       } else if (pal.prop === 'cactus') {
-        const im = inst(new THREE.CylinderGeometry(.24, .28, 1.5, 7), new THREE.MeshLambertMaterial({ color: pal.propColor }), obs.length);
+        const im = inst(new THREE.CapsuleGeometry(.24, 1.1, 4, 10), toon(0xffffff), obs.length);
+        const arms = inst(new THREE.CapsuleGeometry(.14, .5, 4, 8), toon(pal.propColor), obs.length * 2);
         obs.forEach(([x, y], i) => {
-          dummy.position.set(x, .75, y); dummy.rotation.set(0, rng.next() * 6, 0);
-          const s = .8 + rng.next() * .5; dummy.scale.set(1, s, 1);
+          dummy.position.set(x, .84, y); dummy.rotation.set(0, rng.next() * 6, 0);
+          const s = .85 + rng.next() * .45; dummy.scale.set(1, s, 1);
           dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
+          vary(im, i, pal.propColor, pal.propColor2, rng.next());
+          for (let k = 0; k < 2; k++) {
+            const sx = k ? 1 : -1;
+            dummy.position.set(x + sx * .3, .95 + rng.next() * .2, y);
+            dummy.rotation.set(0, 0, sx * .9); dummy.scale.setScalar(.85);
+            dummy.updateMatrix(); arms.setMatrixAt(i * 2 + k, dummy.matrix);
+          }
         });
-        im.instanceMatrix.needsUpdate = true;
+        im.instanceMatrix.needsUpdate = true; arms.instanceMatrix.needsUpdate = true;
+        if (im.instanceColor) im.instanceColor.needsUpdate = true;
       } else {
-        const trunk = inst(new THREE.CylinderGeometry(.13, .17, 1, 6), new THREE.MeshLambertMaterial({ color: pal.trunk }), obs.length);
-        const crown = inst(new THREE.ConeGeometry(.62, 1.5, 7), new THREE.MeshLambertMaterial({ color: pal.propColor, flatShading: true }), obs.length * 2);
+        const snowy = pal.prop === 'snowtree';
+        const trunkMat = toon(pal.trunk);
+        const crownMat = toon(0xffffff);
+        windify(crownMat, .035, 1.1);
+        const trunk = inst(new THREE.CylinderGeometry(.11, .18, 1.1, 7), trunkMat, obs.length);
+        const crown = inst(new THREE.ConeGeometry(.66, 1.15, 8), crownMat, obs.length * 3);
+        const snow = snowy ? inst(new THREE.ConeGeometry(.5, .55, 8), toon(0xf2f8ff), obs.length * 2) : null;
         obs.forEach(([x, y], i) => {
-          const s = .85 + rng.next() * .4;
-          dummy.position.set(x, .5 * s, y); dummy.scale.set(s, s, s); dummy.rotation.set(0, 0, 0);
+          const s = .82 + rng.next() * .5;
+          const lean = (rng.next() - .5) * .09;
+          dummy.position.set(x, .5 * s, y); dummy.scale.set(s, s, s); dummy.rotation.set(lean, rng.next() * 6, lean);
           dummy.updateMatrix(); trunk.setMatrixAt(i, dummy.matrix);
-          dummy.position.set(x, 1.15 * s, y); dummy.rotation.set(0, rng.next() * 6, 0);
-          dummy.updateMatrix(); crown.setMatrixAt(i * 2, dummy.matrix);
-          dummy.position.set(x, 1.72 * s, y); dummy.scale.set(s * .7, s * .8, s * .7);
-          dummy.updateMatrix(); crown.setMatrixAt(i * 2 + 1, dummy.matrix);
+          for (let k = 0; k < 3; k++) {
+            const ks = s * (1 - k * .22);
+            dummy.position.set(x, (1.0 + k * .52) * s, y);
+            dummy.scale.set(ks, ks * (1 - k * .1), ks);
+            dummy.rotation.set(lean, rng.next() * 6, lean);
+            dummy.updateMatrix(); crown.setMatrixAt(i * 3 + k, dummy.matrix);
+            vary(crown, i * 3 + k, pal.propColor, pal.propColor2, rng.next() * .7 + k * .1);
+          }
+          if (snow) for (let k = 0; k < 2; k++) {
+            const ks = s * (1 - k * .25);
+            dummy.position.set(x, (1.25 + k * .52) * s, y);
+            dummy.scale.set(ks, ks * .7, ks); dummy.rotation.set(lean, rng.next() * 6, lean);
+            dummy.updateMatrix(); snow.setMatrixAt(i * 2 + k, dummy.matrix);
+          }
         });
-        trunk.instanceMatrix.needsUpdate = true; crown.instanceMatrix.needsUpdate = true;
+        trunk.instanceMatrix.needsUpdate = true;
+        crown.instanceMatrix.needsUpdate = true;
+        if (crown.instanceColor) crown.instanceColor.needsUpdate = true;
+        if (snow) snow.instanceMatrix.needsUpdate = true;
       }
     }
 
     /* -- herbes hautes -- */
     const gr = tiles[T.HERBE] ?? [];
     if (gr.length) {
-      const im = inst(new THREE.ConeGeometry(.2, .55, 4), new THREE.MeshLambertMaterial({ color: pal.grass, flatShading: true }), gr.length * 3);
+      const bladeMat = toon(0xffffff);
+      windify(bladeMat, .07, 1.9);
+      const blade = new THREE.ConeGeometry(.075, .66, 3);
+      blade.translate(0, .33, 0);
+      const im = inst(blade, bladeMat, gr.length * 7, false);
+      im.receiveShadow = true;
       gr.forEach(([x, y], i) => {
-        for (let k = 0; k < 3; k++) {
-          dummy.position.set(x + (rng.next() - .5) * .7, .26, y + (rng.next() - .5) * .7);
-          dummy.rotation.set(0, rng.next() * 6, (rng.next() - .5) * .25);
-          const s = .8 + rng.next() * .5; dummy.scale.set(s, s, s);
-          dummy.updateMatrix(); im.setMatrixAt(i * 3 + k, dummy.matrix);
+        for (let k = 0; k < 7; k++) {
+          dummy.position.set(x + (rng.next() - .5) * .9, 0, y + (rng.next() - .5) * .9);
+          dummy.rotation.set((rng.next() - .5) * .55, rng.next() * 6, (rng.next() - .5) * .55);
+          const s = .8 + rng.next() * .7;
+          dummy.scale.set(s, s * (.75 + rng.next() * .8), s);
+          dummy.updateMatrix(); im.setMatrixAt(i * 7 + k, dummy.matrix);
+          vary(im, i * 7 + k, pal.grass, pal.grass2, rng.next());
         }
       });
       im.instanceMatrix.needsUpdate = true;
-      this.grassTuft = im;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
     }
 
-    /* -- fleurs -- */
+    /* -- fleurs (tige + corolle) -- */
     const fl = tiles[T.FLEUR] ?? [];
     if (fl.length) {
+      const stemMat = toon(pal.grass);
+      windify(stemMat, .05, 1.7);
+      const stem = new THREE.CylinderGeometry(.02, .03, .34, 5);
+      stem.translate(0, .17, 0);
+      const stems = inst(stem, stemMat, fl.length * 3, false);
       pal.flower.forEach((cHex, ci) => {
         const sub = fl.filter((_, i) => i % pal.flower.length === ci);
         if (!sub.length) return;
-        const im = inst(new THREE.SphereGeometry(.13, 6, 5), new THREE.MeshLambertMaterial({ color: cHex }), sub.length * 2);
+        const headMat = toon(cHex);
+        windify(headMat, .05, 1.7);
+        const head = inst(new THREE.SphereGeometry(.1, 7, 6), headMat, sub.length * 3, false);
         sub.forEach(([x, y], i) => {
-          for (let k = 0; k < 2; k++) {
-            dummy.position.set(x + (rng.next() - .5) * .6, .16, y + (rng.next() - .5) * .6);
-            dummy.rotation.set(0, 0, 0); dummy.scale.setScalar(.8 + rng.next() * .5);
-            dummy.updateMatrix(); im.setMatrixAt(i * 2 + k, dummy.matrix);
+          for (let k = 0; k < 3; k++) {
+            const ox = (rng.next() - .5) * .7, oz = (rng.next() - .5) * .7;
+            dummy.position.set(x + ox, .34, y + oz); dummy.rotation.set(0, 0, 0);
+            dummy.scale.setScalar(.8 + rng.next() * .5);
+            dummy.updateMatrix(); head.setMatrixAt(i * 3 + k, dummy.matrix);
           }
         });
-        im.instanceMatrix.needsUpdate = true;
+        head.instanceMatrix.needsUpdate = true;
       });
+      fl.forEach(([x, y], i) => {
+        for (let k = 0; k < 3; k++) {
+          dummy.position.set(x + (rng.next() - .5) * .7, 0, y + (rng.next() - .5) * .7);
+          dummy.rotation.set(0, 0, 0); dummy.scale.setScalar(1);
+          dummy.updateMatrix(); stems.setMatrixAt(i * 3 + k, dummy.matrix);
+        }
+      });
+      stems.instanceMatrix.needsUpdate = true;
+    }
+
+    /* -- cailloux décoratifs -- */
+    if (!map.indoor) {
+      const open = (tiles[T.SOL] ?? []).concat(tiles[T.SABLE] ?? []);
+      const count = Math.min(90, Math.floor(open.length * .06));
+      if (count > 0) {
+        const im = inst(new THREE.DodecahedronGeometry(.13, 0), toon(pal.propColor2), count);
+        for (let i = 0; i < count; i++) {
+          const [x, y] = open[rng.int(open.length)];
+          dummy.position.set(x + (rng.next() - .5) * .7, .07, y + (rng.next() - .5) * .7);
+          dummy.rotation.set(rng.next() * 6, rng.next() * 6, rng.next() * 6);
+          dummy.scale.setScalar(.6 + rng.next() * .9);
+          dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
+        }
+        im.instanceMatrix.needsUpdate = true;
+      }
     }
 
     /* -- eau animée -- */
     const wa = tiles[T.EAU] ?? [];
     if (wa.length) {
-      const im = inst(new THREE.BoxGeometry(1, .3, 1), new THREE.MeshLambertMaterial({ color: pal.water, transparent: true, opacity: .88 }), wa.length);
+      const waterMat = new THREE.MeshToonMaterial({
+        color: 0xffffff, gradientMap: toonGradient(), transparent: true, opacity: .92,
+      });
+      waterMat.onBeforeCompile = (sh) => {
+        sh.uniforms.uTime = uTime;
+        sh.vertexShader = sh.vertexShader
+          .replace('#include <common>', '#include <common>\nuniform float uTime;')
+          .replace('#include <begin_vertex>', `#include <begin_vertex>
+            {
+              #ifdef USE_INSTANCING
+                vec3 wp = instanceMatrix[3].xyz;
+              #else
+                vec3 wp = vec3(0.0);
+              #endif
+              if (transformed.y > 0.0) {
+                transformed.y += sin(uTime * 1.7 + wp.x * 1.5 + wp.z * 1.1) * 0.055
+                              + sin(uTime * 2.4 + wp.x * 0.7 - wp.z * 1.8) * 0.035;
+              }
+            }`);
+      };
+      const im = inst(new THREE.BoxGeometry(1, .86, 1, 2, 1, 2), waterMat, wa.length, false);
+      im.receiveShadow = true;
+      const deep = new THREE.Color(pal.waterDeep);
+      const shallow = new THREE.Color(pal.water).lerp(new THREE.Color(0xffffff), .3);
+      const at = (x: number, y: number) => (x < 0 || y < 0 || x >= map.w || y >= map.h ? T.OBSTACLE : map.tiles[y * map.w + x]);
+      // Profondeur = distance à la rive sur 2 anneaux : dégradé doux plutôt qu'un damier.
+      const depth = (x: number, y: number) => {
+        for (let r = 1; r <= 2; r++) {
+          for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+            if (at(x + dx, y + dy) !== T.EAU) return (r - 1) / 2;
+          }
+        }
+        return 1;
+      };
       wa.forEach(([x, y], i) => {
-        dummy.position.set(x, -.14, y); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+        dummy.position.set(x, -.44, y); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
         dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
+        // Hauts-fonds plus clairs au bord : une teinte suffit, pas besoin d'écume géométrique.
+        tint.copy(shallow).lerp(deep, depth(x, y)).lerp(new THREE.Color(pal.water), .35);
+        im.setColorAt(i, tint);
       });
       im.instanceMatrix.needsUpdate = true;
-      im.userData.waterTiles = wa;
-      this.water.push(im as unknown as THREE.Mesh);
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
     }
 
-    /* -- murs / bâtiments -- */
-    const mur = tiles[T.MUR] ?? [];
-    if (mur.length) {
-      const wallCol = map.indoor ? 0x9a7f68 : 0xd9cbb4;
-      const im = inst(new THREE.BoxGeometry(1, 2.2, 1), new THREE.MeshLambertMaterial({ color: wallCol }), mur.length);
-      const roof = inst(new THREE.BoxGeometry(1.08, .38, 1.08), new THREE.MeshLambertMaterial({ color: map.indoor ? 0x6b5240 : 0xc4564e }), mur.length);
-      // Façades sud : on pose une fenêtre sur les murs qui donnent sur l'extérieur.
-      const front = map.indoor ? [] : mur.filter(([x, y]) => y + 1 < map.h && map.tiles[(y + 1) * map.w + x] !== T.MUR);
-      const win = front.length ? inst(new THREE.BoxGeometry(.52, .5, .1), new THREE.MeshLambertMaterial({ color: 0x8fd0ff }), front.length) : null;
-      mur.forEach(([x, y], i) => {
-        dummy.position.set(x, 1.1, y); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
-        dummy.position.set(x, 2.36, y);
-        dummy.updateMatrix(); roof.setMatrixAt(i, dummy.matrix);
-      });
-      front.forEach(([x, y], i) => {
-        if (!win) return;
-        dummy.position.set(x, 1.45, y + .51); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix(); win.setMatrixAt(i, dummy.matrix);
-      });
-      if (win) win.instanceMatrix.needsUpdate = true;
-      im.instanceMatrix.needsUpdate = true; roof.instanceMatrix.needsUpdate = true;
+    /* -- halos de plafonniers (intérieurs) -- */
+    if (map.indoor && map.biome === 'interieur') {
+      const pools = new THREE.Group();
+      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0cf, transparent: true, opacity: .12, depthWrite: false });
+      for (let y = 3; y < map.h - 2; y += 5) {
+        for (let x = 3; x < map.w - 2; x += 5) {
+          if (map.tiles[y * map.w + x] !== T.TAPIS) continue;
+          const disc = new THREE.Mesh(new THREE.CircleGeometry(2.1, 20), mat);
+          disc.rotation.x = -Math.PI / 2;
+          disc.position.set(x, .012, y);
+          pools.add(disc);
+        }
+      }
+      if (pools.children.length) this.scene.add(pools);
     }
 
     /* -- comptoirs -- */
     const cpt = tiles[T.COMPTOIR] ?? [];
     if (cpt.length) {
-      const im = inst(new THREE.BoxGeometry(1, .9, 1), new THREE.MeshLambertMaterial({ color: 0xd8b06a }), cpt.length);
+      const im = inst(new THREE.BoxGeometry(1, .92, 1), toon(0xd9b573), cpt.length);
+      const top = inst(new THREE.BoxGeometry(1.1, .1, 1.1), toon(0xf0e0bd), cpt.length);
       cpt.forEach(([x, y], i) => {
-        dummy.position.set(x, .45, y); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+        dummy.position.set(x, .46, y); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
         dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
+        dummy.position.set(x, .96, y);
+        dummy.updateMatrix(); top.setMatrixAt(i, dummy.matrix);
       });
-      im.instanceMatrix.needsUpdate = true;
+      im.instanceMatrix.needsUpdate = true; top.instanceMatrix.needsUpdate = true;
     }
 
-    /* -- portes -- */
+    /* -- portes & sorties -- */
     for (const e of map.ents) {
       if (e.kind === 'door') {
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.9, .25), new THREE.MeshLambertMaterial({ color: 0x5b3f2c }));
-        frame.position.set(e.x, .95, e.y - .45);
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(1.16, 2, .3), toon(0x5b3f2c));
+        frame.position.set(e.x, 1, e.y - .45);
+        frame.castShadow = true; frame.receiveShadow = true;
         this.scene.add(frame);
-        const panel = new THREE.Mesh(new THREE.BoxGeometry(.78, 1.5, .1), new THREE.MeshLambertMaterial({ color: 0xf0d9a0 }));
-        panel.position.set(e.x, .8, e.y - .3);
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(.82, 1.55, .12), toon(0xf0d9a0));
+        panel.position.set(e.x, .82, e.y - .29);
         this.scene.add(panel);
-        const awning = new THREE.Mesh(new THREE.BoxGeometry(1.5, .16, .7), new THREE.MeshLambertMaterial({ color: 0x2a7fd4 }));
-        awning.position.set(e.x, 1.95, e.y - .2);
+        const knob = new THREE.Mesh(new THREE.SphereGeometry(.06, 8, 6), toon(0xf5c542));
+        knob.position.set(e.x + .28, .82, e.y - .22);
+        this.scene.add(knob);
+        const awning = new THREE.Mesh(new THREE.BoxGeometry(1.6, .18, .78), toon(0x2a7fd4));
+        awning.position.set(e.x, 2.0, e.y - .16);
+        awning.castShadow = true;
         this.scene.add(awning);
+        for (const s of [-1, 1]) {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, 1.9, 6), toon(0x8f7b5e));
+          post.position.set(e.x + s * .72, 1.05, e.y - .1);
+          post.castShadow = true;
+          this.scene.add(post);
+        }
       }
       if (e.kind === 'exit' && !map.indoor) {
-        const m = new THREE.Mesh(new THREE.TorusGeometry(.55, .09, 6, 12, Math.PI),
-          new THREE.MeshLambertMaterial({ color: 0xf0e6c8 }));
-        m.position.set(e.x, .05, e.y);
-        m.rotation.set(0, e.dir === 'e' || e.dir === 'w' ? Math.PI / 2 : 0, 0);
-        this.scene.add(m);
+        const arch = new THREE.Mesh(new THREE.TorusGeometry(.62, .1, 8, 16, Math.PI), toon(0xf2e8cd));
+        arch.position.set(e.x, .04, e.y);
+        arch.rotation.set(0, e.dir === 'e' || e.dir === 'w' ? Math.PI / 2 : 0, 0);
+        arch.castShadow = true;
+        this.scene.add(arch);
       }
     }
   }
 
+  /** Chaîne de montagnes lointaine : donne un horizon au lieu d'un aplat brumeux. */
+  private buildHorizon(map: GameMap, pal: Palette) {
+    const rng = new RNG(hashStr(map.id) + 909);
+    const cx = map.w / 2 - .5, cz = map.h / 2 - .5;
+    const near = new THREE.Color(pal.ground).lerp(new THREE.Color(pal.skyLow), .55);
+    const far = new THREE.Color(pal.ground).lerp(new THREE.Color(pal.skyLow), .78);
+    const geo = new THREE.ConeGeometry(1, 1, 5);
+    for (let ring = 0; ring < 2; ring++) {
+      const radius = 52 + ring * 22;
+      const mat = new THREE.MeshBasicMaterial({ color: ring ? far : near, fog: false });
+      const count = 26 + ring * 8;
+      const im = new THREE.InstancedMesh(geo, mat, count);
+      const d = new THREE.Object3D();
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2 + rng.next() * .12;
+        const r = radius + rng.next() * 12;
+        const h = 9 + rng.next() * 13 - ring * 2;
+        d.position.set(cx + Math.cos(a) * r, h / 2 - 2, cz + Math.sin(a) * r);
+        d.rotation.set(0, rng.next() * 6, 0);
+        d.scale.set(9 + rng.next() * 9, h, 9 + rng.next() * 9);
+        d.updateMatrix();
+        im.setMatrixAt(i, d.matrix);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      im.renderOrder = -1;
+      this.scene.add(im);
+    }
+  }
+
+  private buildClouds(map: GameMap, pal: Palette) {
+    const rng = new RNG(hashStr(map.id) + 4242);
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .78, fog: false });
+    const puff = new THREE.SphereGeometry(1, 8, 6);
+    puff.userData.shared = false;
+    for (let i = 0; i < 12; i++) {
+      const cloud = new THREE.Group();
+      const n = 3 + rng.int(3);
+      for (let k = 0; k < n; k++) {
+        const m = new THREE.Mesh(puff, mat);
+        m.position.set((k - n / 2) * (1.4 + rng.next()), rng.next() * .8, (rng.next() - .5) * 2);
+        const s = 1.6 + rng.next() * 1.7;
+        m.scale.set(s, s * .55, s);
+        cloud.add(m);
+      }
+      cloud.position.set(
+        map.w / 2 + (rng.next() - .5) * 150,
+        17 + rng.next() * 11,
+        map.h / 2 - 20 - rng.next() * 90,
+      );
+      cloud.userData.speed = .35 + rng.next() * .5;
+      g.add(cloud);
+    }
+    void pal;
+    this.scene.add(g);
+    this.clouds = g;
+  }
+
   private buildActors(map: GameMap) {
     this.actors = [];
+    const toon = (c: number, o: THREE.MeshToonMaterialParameters = {}) => new THREE.MeshToonMaterial({ color: c, gradientMap: toonGradient(), ...o });
     for (const e of map.ents) {
       if (this.removed.has(entKey(map, e))) continue;
       let rig: CreatureRig | null = null;
@@ -320,32 +684,47 @@ export class Overworld {
         case 'boss': rig = buildHuman(0x2b2f3a, 0xe8c9a0, 0x151515, 0xb03a3a); break;
         case 'heal': rig = buildHuman(0xff8fb0, 0xf7d7bd, 0xff5c8a); break;
         case 'shop': rig = buildHuman(0x4fb0e0, 0xe8c9a0, 0x3a2a20); break;
-        case 'static': rig = null; break;
         case 'item': {
           const ball = new THREE.Group();
-          const top = new THREE.Mesh(new THREE.SphereGeometry(.26, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0xe8434e }));
-          const bot = new THREE.Mesh(new THREE.SphereGeometry(.26, 10, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0xf2f5fa }));
-          ball.add(top, bot);
-          ball.position.set(e.x, .34, e.y);
+          const top = new THREE.Mesh(new THREE.SphereGeometry(.27, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), toon(0xe8434e));
+          const bot = new THREE.Mesh(new THREE.SphereGeometry(.27, 14, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), toon(0xf2f5fa));
+          const belt = new THREE.Mesh(new THREE.CylinderGeometry(.275, .275, .07, 14), toon(0x1b2130));
+          const btn = new THREE.Mesh(new THREE.CylinderGeometry(.09, .09, .09, 10), toon(0xf6f9ff));
+          btn.rotation.x = Math.PI / 2; btn.position.z = .24;
+          ball.add(top, bot, belt, btn);
+          ball.traverse((o) => { (o as THREE.Mesh).castShadow = true; });
+          const halo = new THREE.Mesh(new THREE.RingGeometry(.34, .48, 18), new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: .35, side: THREE.DoubleSide }));
+          halo.rotation.x = -Math.PI / 2; halo.position.y = -.3;
+          ball.add(halo);
+          ball.position.set(e.x, .38, e.y);
           this.scene.add(ball);
           this.actors.push({ ent: e, rig: { group: ball, bob: [ball], limbs: [], height: .5 } });
           continue;
         }
         case 'sign': {
           const post = new THREE.Group();
-          post.add(new THREE.Mesh(new THREE.CylinderGeometry(.07, .07, .7, 6), new THREE.MeshLambertMaterial({ color: 0x6b4a2f })));
-          const board = new THREE.Mesh(new THREE.BoxGeometry(.8, .5, .1), new THREE.MeshLambertMaterial({ color: 0xc9a97a }));
-          board.position.y = .55; post.add(board);
-          post.position.set(e.x, .35, e.y);
+          const p1 = new THREE.Mesh(new THREE.CylinderGeometry(.07, .07, .8, 6), toon(0x6b4a2f));
+          p1.castShadow = true;
+          post.add(p1);
+          const board = new THREE.Mesh(new THREE.BoxGeometry(.9, .58, .11), toon(0xc9a97a));
+          board.position.y = .62; board.castShadow = true;
+          const frame = new THREE.Mesh(new THREE.BoxGeometry(1, .68, .07), toon(0x8b6b45));
+          frame.position.y = .62; frame.position.z = -.03;
+          post.add(frame, board);
+          post.position.set(e.x, .4, e.y);
           this.scene.add(post);
           this.actors.push({ ent: e, rig: { group: post, bob: [], limbs: [], height: .9 } });
           continue;
         }
         case 'pc': {
-          const pc = new THREE.Mesh(new THREE.BoxGeometry(.8, 1.1, .6), new THREE.MeshLambertMaterial({ color: 0x35507a }));
-          pc.position.set(e.x, .55, e.y);
+          const pc = new THREE.Group();
+          const box = new THREE.Mesh(new THREE.BoxGeometry(.85, 1.15, .62), toon(0x35507a));
+          box.castShadow = true; pc.add(box);
+          const screen = new THREE.Mesh(new THREE.BoxGeometry(.6, .45, .06), toon(0x7fe0ff, { emissive: 0x1d5f7a }));
+          screen.position.set(0, .3, .33); pc.add(screen);
+          pc.position.set(e.x, .58, e.y);
           this.scene.add(pc);
-          this.actors.push({ ent: e, rig: { group: pc, bob: [], limbs: [], height: 1.1 } });
+          this.actors.push({ ent: e, rig: { group: pc, bob: [], limbs: [], height: 1.15 } });
           continue;
         }
         default: rig = null;
@@ -412,11 +791,37 @@ export class Overworld {
 
   setFacing(f: number) { this.facing = f; this.player.group.rotation.y = faceAngle(f); }
 
+  /** Recule le joueur d'une case (sortie bloquée). */
+  pushBack() {
+    const [dx, dy] = DIRV[this.facing];
+    const nx = this.px - dx, ny = this.py - dy;
+    if (WALKABLE.has(this.tileAt(nx, ny))) { this.px = nx; this.py = ny; }
+    this.player.group.position.set(this.px, 0, this.py);
+  }
+
+  /** Téléporte le joueur sur une case. */
+  place(x: number, y: number, facing = this.facing) {
+    this.px = x; this.py = y; this.facing = facing;
+    this.moving = false;
+    this.syncPlayer();
+    this.camTarget.set(x, 0, y);
+  }
+
+  /** Fait avancer un dresseur vers le joueur avant le combat. */
+  approach(ent: Ent) {
+    const a = this.actors.find((v) => v.ent === ent);
+    if (!a) return;
+    const dx = Math.sign(this.px - ent.x), dy = Math.sign(this.py - ent.y);
+    a.rig.group.position.set(this.px - dx, 0, this.py - dy);
+    a.rig.group.rotation.y = faceAngle(dx !== 0 ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0));
+  }
+
   /* ---------------- boucle ---------------- */
   update(dt: number, dir: { x: number; y: number }, run: boolean, cam: THREE.PerspectiveCamera) {
     if (!this.loaded) return;
     this.clock += dt;
     const t = this.clock;
+    uTime.value = t;
 
     if (!this.paused) {
       if (this.moving) {
@@ -429,13 +834,13 @@ export class Overworld {
         } else {
           const k = this.moveT;
           this.player.group.position.set(
-            this.fromX + (this.toX - this.fromX) * k, Math.sin(k * Math.PI) * .04,
+            this.fromX + (this.toX - this.fromX) * k, Math.sin(k * Math.PI) * .05,
             this.fromY + (this.toY - this.fromY) * k,
           );
         }
       } else if (Math.abs(dir.x) > .3 || Math.abs(dir.y) > .3) {
         const f = Math.abs(dir.x) > Math.abs(dir.y) ? (dir.x < 0 ? 1 : 3) : (dir.y < 0 ? 2 : 0);
-        if (f !== this.facing) { this.setFacing(f); }
+        if (f !== this.facing) this.setFacing(f);
         const [dx, dy] = DIRV[f];
         const nx = this.px + dx, ny = this.py + dy;
         if (!this.blocked(nx, ny)) {
@@ -449,10 +854,14 @@ export class Overworld {
     animateRig(this.player, t, this.moving ? 1 : 0);
     for (const a of this.actors) {
       if (a.ent.kind === 'npc' || a.ent.kind === 'trainer' || a.ent.kind === 'leader' || a.ent.kind === 'boss' || a.ent.kind === 'heal' || a.ent.kind === 'shop') animateRig(a.rig, t);
-      else if (a.ent.kind === 'item') { a.rig.group.rotation.y = t * 1.4; a.rig.group.position.y = .34 + Math.sin(t * 2) * .07; }
+      else if (a.ent.kind === 'item') { a.rig.group.rotation.y = t * 1.4; a.rig.group.position.y = .38 + Math.sin(t * 2) * .08; }
     }
-    for (const w of this.water) w.position.y = Math.sin(t * 1.6) * .045;
-    if (this.grassTuft) this.grassTuft.rotation.z = Math.sin(t * 1.1) * .012;
+    if (this.clouds) {
+      for (const c of this.clouds.children) {
+        c.position.x += (c.userData.speed as number) * dt;
+        if (c.position.x > this.map.w / 2 + 80) c.position.x = this.map.w / 2 - 80;
+      }
+    }
 
     // caméra suiveuse
     const p = this.player.group.position;
@@ -461,6 +870,13 @@ export class Overworld {
     const hgt = this.map.indoor ? 7.2 : 8.6;
     cam.position.set(this.camTarget.x, hgt, this.camTarget.z + dist);
     cam.lookAt(this.camTarget.x, .8, this.camTarget.z - 1.2);
+
+    // le soleil suit le joueur pour garder une ombre nette
+    if (this.lights?.sun.castShadow) {
+      this.lights.sun.position.set(this.camTarget.x + 9, 16, this.camTarget.z + 7);
+      this.lights.sun.target.position.set(this.camTarget.x, 0, this.camTarget.z);
+      this.lights.sun.target.updateMatrixWorld();
+    }
   }
 
   private onArrive() {
@@ -490,31 +906,6 @@ export class Overworld {
         if (cx === this.px && cy === this.py) { this.hooks.onTrainerSight(e); return; }
       }
     }
-  }
-
-  /** Recule le joueur d'une case (sortie bloquée). */
-  pushBack() {
-    const [dx, dy] = DIRV[this.facing];
-    const nx = this.px - dx, ny = this.py - dy;
-    if (WALKABLE.has(this.tileAt(nx, ny))) { this.px = nx; this.py = ny; }
-    this.player.group.position.set(this.px, 0, this.py);
-  }
-
-  /** Téléporte le joueur sur une case. */
-  place(x: number, y: number, facing = this.facing) {
-    this.px = x; this.py = y; this.facing = facing;
-    this.moving = false;
-    this.syncPlayer();
-    this.camTarget.set(x, 0, y);
-  }
-
-  /** Fait avancer un dresseur vers le joueur avant le combat. */
-  approach(ent: Ent) {
-    const a = this.actors.find((v) => v.ent === ent);
-    if (!a) return;
-    const dx = Math.sign(this.px - ent.x), dy = Math.sign(this.py - ent.y);
-    a.rig.group.position.set(this.px - dx, 0, this.py - dy);
-    a.rig.group.rotation.y = faceAngle(dx !== 0 ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0));
   }
 }
 

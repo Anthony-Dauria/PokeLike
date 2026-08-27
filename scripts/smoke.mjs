@@ -77,6 +77,13 @@ for (let i = 0; i < 60; i++) {
 await shot('04-walk');
 
 // menu
+const fps = await page.evaluate(() => new Promise((res) => {
+  let n = 0; const t0 = performance.now();
+  const tick = () => { if (++n < 90) requestAnimationFrame(tick); else res(Math.round((n * 1000) / (performance.now() - t0))); };
+  requestAnimationFrame(tick);
+}));
+console.log('FPS (rendu logiciel, plancher):', fps);
+console.log('Rendu:', JSON.stringify(await page.evaluate(() => window.pokelike.debugPerf())));
 console.log('MODE avant menu:', await page.evaluate(() => window.pokelike?.mode));
 await page.click('#menu-btn');
 await page.waitForTimeout(600);

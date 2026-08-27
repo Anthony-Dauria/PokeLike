@@ -24,6 +24,7 @@ export interface SaveData {
   steps: number;
   uid: number;
   muted: boolean;
+  quality?: 'haut' | 'leger';
 }
 
 export const SAVE_KEY = 'pokelike.save.v1';
@@ -49,6 +50,7 @@ export class GameState {
   repel = 0;
   steps = 0;
   muted = false;
+  quality: 'haut' | 'leger' = 'haut';
 
   /* ---------- badges ---------- */
   hasBadge(id: string) { return this.badges.includes(id); }
@@ -90,7 +92,7 @@ export class GameState {
       starter: this.starter, party: this.party, box: this.box, bag: this.bag, badges: this.badges,
       flags: this.flags, seen: [...this.seen], caught: [...this.caught],
       zone: this.zone, x: this.x, y: this.y, facing: this.facing, lastCenter: this.lastCenter,
-      repel: this.repel, steps: this.steps, uid: nextUid(), muted: this.muted,
+      repel: this.repel, steps: this.steps, uid: nextUid(), muted: this.muted, quality: this.quality,
     };
   }
 
@@ -101,6 +103,7 @@ export class GameState {
     this.zone = d.zone; this.x = d.x; this.y = d.y; this.facing = d.facing ?? 0;
     this.lastCenter = d.lastCenter ?? START_ZONE; this.repel = d.repel ?? 0; this.steps = d.steps ?? 0;
     this.muted = !!d.muted;
+    this.quality = d.quality === 'leger' ? 'leger' : 'haut';
     resetUid(Math.max(d.uid ?? 1, ...this.party.map((m) => m.uid + 1), ...this.box.map((m) => m.uid + 1), 1));
   }
 

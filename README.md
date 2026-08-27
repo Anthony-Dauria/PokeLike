@@ -80,6 +80,21 @@ Quatre **légendaires itinérants** (Ignivore, Abyssaltar, Sylvanor, Chronoss) n
 - **Progression** : 100 niveaux, XP cubique, natures (25), IV, apprentissage de capacités avec remplacement au choix, évolutions annulables, PC de stockage illimité.
 - **Confort mobile** : joystick tactile + boutons A/B, clavier pris en charge (flèches/ZQSD, Entrée, Échap, Maj pour courir), interface adaptée portrait **et** paysage, encoches respectées.
 
+### Rendu 3D
+
+Le jeu vise un rendu **cel-shading** lisible sur petit écran, sans aucune texture ni asset :
+
+- **Ombrage toon** (`MeshToonMaterial` + rampe de dégradé) sur tout ce qui est affiché, avec un ciel en dôme dégradé et un brouillard calé sur la couleur d'horizon.
+- **Ombres portées** temps réel : le soleil suit le joueur pour garder une carte d'ombre nette autour de lui.
+- **Contour façon dessin animé** sur les créatures en combat — coque inversée décalée *en espace vue*, donc d'épaisseur constante quelle que soit la taille des pièces du modèle.
+- **Terrain vallonné** : champ de hauteur bruité partagé aux coins des tuiles (donc sans fissure), aplati sous les chemins et les bâtiments, avec occlusion douce près des obstacles.
+- **Couleurs fondues par famille de surface** : les nuances d'herbe se mélangent entre voisines, tandis que chemins, hautes herbes et rives gardent un bord net — les zones de rencontre restent lisibles d'un coup d'œil.
+- **Végétation animée par le vent** (shader de déplacement instancié), **eau** avec houle, hauts-fonds dégradés et lit sombre, **nuages** dérivants et **chaîne de montagnes** à l'horizon.
+- Onze palettes de biome (plaine, forêt, montagne, plage, désert, neige, sommet, volcan, marais, grotte, intérieur) : chaque région a sa lumière, ses props et son ciel.
+- Combats : arène en deux plateformes, décor de fond sur deux profondeurs, poussières en suspension, ondes de choc au sol, gerbes de particules aux couleurs du type et ombres de contact.
+
+Le tout tient en ~40 appels de rendu et ~26 000 triangles par image — largement dans le budget d'un téléphone milieu de gamme. Un réglage **Graphismes : Élevés / Légers** (menu Options) coupe les ombres et abaisse la résolution interne pour les appareils modestes.
+
 ### Contenu généré par le code
 
 Rien n'est téléchargé : les cartes (villes, routes, grottes, arènes, intérieurs — **114 cartes**) sont générées de façon **déterministe** à partir d'une graine, les modèles 3D des créatures sont construits à partir de leur silhouette et de leurs types, et la bande-son chiptune est synthétisée en Web Audio.
@@ -95,6 +110,8 @@ Rien n'est téléchargé : les cartes (villes, routes, grottes, arènes, intéri
 | Parler / valider | **A** ou taper l'écran | Entrée / Espace |
 | Annuler | **B** | Échap |
 | Menu | **☰** | Tab / M |
+
+Le menu **Options** règle le son et le niveau de détail graphique.
 
 ---
 

@@ -1,27 +1,56 @@
 import * as THREE from 'three';
 
+/** Horloge partagée par tous les shaders animés (vent, eau…). */
+export const uTime = { value: 0 };
+
+export type Quality = 'haut' | 'leger';
+
+/** Rampe de dégradé pour le cel-shading (MeshToonMaterial). */
+let toonRamp: THREE.DataTexture | null = null;
+export function toonGradient(): THREE.DataTexture {
+  if (toonRamp) return toonRamp;
+  const steps = new Uint8Array([96, 142, 192, 232, 255]);
+  toonRamp = new THREE.DataTexture(steps, steps.length, 1, THREE.RedFormat);
+  toonRamp.minFilter = toonRamp.magFilter = THREE.NearestFilter;
+  toonRamp.generateMipmaps = false;
+  toonRamp.needsUpdate = true;
+  return toonRamp;
+}
+
 export class Renderer {
   readonly gl: THREE.WebGLRenderer;
   readonly camera: THREE.PerspectiveCamera;
+  quality: Quality = 'haut';
   private dpr = 1;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.gl = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+    this.gl = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.gl.setPixelRatio(this.dpr);
-    this.gl.shadowMap.enabled = false;
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
-    this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 220);
+    // Rendu stylisé : pas de tone mapping, les couleurs restent franches.
+    this.gl.toneMapping = THREE.NoToneMapping;
+    this.gl.shadowMap.enabled = true;
+    this.gl.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 400);
     this.resize();
     addEventListener('resize', () => this.resize());
     addEventListener('orientationchange', () => setTimeout(() => this.resize(), 120));
   }
 
+  setQuality(q: Quality) {
+    this.quality = q;
+    this.gl.shadowMap.enabled = q === 'haut';
+    this.gl.shadowMap.needsUpdate = true;
+    this.resize();
+  }
+
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
-    // Sur petits écrans on réduit un peu la résolution interne pour garder 60 fps.
-    const perf = w * h > 1_400_000 ? 0.8 : 1;
-    this.gl.setPixelRatio(Math.min(this.dpr, 2) * perf);
+    const cap = this.quality === 'haut' ? 2 : 1.35;
+    // Sur les très grands écrans on réduit la résolution interne pour tenir 60 fps.
+    const perf = w * h > 1_400_000 ? 0.82 : 1;
+    this.gl.setPixelRatio(Math.min(this.dpr, cap) * perf);
     this.gl.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -32,17 +61,107 @@ export class Renderer {
   }
 }
 
-/** Éclairage commun : ambiance + soleil directionnel + rebond. */
-export function addLights(scene: THREE.Scene, sky: number, ground: number, sun = 0xffffff) {
-  const hemi = new THREE.HemisphereLight(sky, ground, 1.05);
+export interface SceneLights {
+  hemi: THREE.HemisphereLight;
+  sun: THREE.DirectionalLight;
+  fill: THREE.DirectionalLight;
+}
+
+/** Éclairage commun : ciel/sol, soleil projetant des ombres, et lumière de remplissage froide. */
+export function addLights(scene: THREE.Scene, sky: number, ground: number, sun = 0xffffff, shadows = true): SceneLights {
+  const hemi = new THREE.HemisphereLight(sky, ground, .62);
   scene.add(hemi);
-  const dir = new THREE.DirectionalLight(sun, 1.0);
-  dir.position.set(6, 12, 4);
-  scene.add(dir);
-  const fill = new THREE.DirectionalLight(sky, 0.35);
-  fill.position.set(-5, 4, -6);
+
+  const key = new THREE.DirectionalLight(sun, 1.05);
+  key.position.set(9, 16, 7);
+  if (shadows) {
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.bias = -0.0009;
+    key.shadow.normalBias = 0.06;
+    const c = key.shadow.camera;
+    c.near = 1; c.far = 60;
+    c.left = -18; c.right = 18; c.top = 18; c.bottom = -18;
+    c.updateProjectionMatrix();
+  }
+  scene.add(key);
+  scene.add(key.target);
+
+  const fill = new THREE.DirectionalLight(sky, 0.28);
+  fill.position.set(-7, 5, -8);
   scene.add(fill);
-  return { hemi, dir, fill };
+
+  return { hemi, sun: key, fill };
+}
+
+const SKY_VERT = /* glsl */`
+  varying vec3 vDir;
+  void main() {
+    vDir = normalize(position);
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+const SKY_FRAG = /* glsl */`
+  uniform vec3 uTop, uMid, uBottom;
+  uniform float uSunY;
+  varying vec3 vDir;
+  void main() {
+    float h = clamp(vDir.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 col = h < 0.5
+      ? mix(uBottom, uMid, smoothstep(0.28, 0.5, h))
+      : mix(uMid, uTop, smoothstep(0.5, 0.92, h));
+    // halo diffus autour du soleil
+    float glow = pow(clamp(vDir.y * 0.35 + uSunY, 0.0, 1.0), 6.0);
+    col += glow * 0.16;
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+/** Dôme de ciel dégradé (remplace la couleur de fond plate). */
+export function addSky(scene: THREE.Scene, top: number, mid: number, bottom: number, sunY = 0.55): THREE.Mesh {
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: {
+      uTop: { value: new THREE.Color(top) },
+      uMid: { value: new THREE.Color(mid) },
+      uBottom: { value: new THREE.Color(bottom) },
+      uSunY: { value: sunY },
+    },
+    vertexShader: SKY_VERT, fragmentShader: SKY_FRAG,
+  });
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(180, 24, 16), mat);
+  dome.renderOrder = -1;
+  dome.frustumCulled = false;
+  scene.add(dome);
+  return dome;
+}
+
+/** Ajoute une oscillation de vent au sommet des géométries instanciées. */
+export function windify(mat: THREE.Material, strength: number, speed = 1.5) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = uTime;
+    shader.uniforms.uWind = { value: strength };
+    shader.uniforms.uWindSpeed = { value: speed };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform float uTime;
+        uniform float uWind;
+        uniform float uWindSpeed;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          #ifdef USE_INSTANCING
+            vec3 wp = instanceMatrix[3].xyz;
+          #else
+            vec3 wp = vec3(0.0);
+          #endif
+          float phase = wp.x * 0.65 + wp.z * 0.83;
+          float amp = uWind * max(transformed.y, 0.0);
+          transformed.x += sin(uTime * uWindSpeed + phase) * amp;
+          transformed.z += cos(uTime * uWindSpeed * 0.8 + phase * 1.3) * amp * 0.6;
+        }`);
+  };
+  mat.needsUpdate = true;
 }
 
 /** Libère les ressources GPU d'un objet retiré de la scène. */
@@ -53,22 +172,14 @@ export function disposeObject(root: THREE.Object3D | null) {
     if (!m.isMesh && !(obj as THREE.InstancedMesh).isInstancedMesh) return;
     if (m.geometry && !m.geometry.userData.shared) m.geometry.dispose();
     const mat = m.material as THREE.Material | THREE.Material[];
-    if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-    else mat?.dispose();
+    if (Array.isArray(mat)) mat.forEach((x) => !x.userData.shared && x.dispose());
+    else if (mat && !mat.userData.shared) mat.dispose();
   });
 }
 
 /** Libère les ressources GPU d'une scène qu'on remplace (important sur mobile). */
 export function disposeScene(scene: THREE.Scene | null) {
   if (!scene) return;
-  scene.traverse((obj) => {
-    const m = obj as THREE.Mesh;
-    if (!m.isMesh && !(obj as THREE.InstancedMesh).isInstancedMesh) return;
-    // Les géométries partagées entre modèles sont marquées et ne doivent pas être détruites.
-    if (m.geometry && !m.geometry.userData.shared) m.geometry.dispose();
-    const mat = m.material as THREE.Material | THREE.Material[];
-    if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-    else mat?.dispose();
-  });
+  disposeObject(scene);
   scene.clear();
 }

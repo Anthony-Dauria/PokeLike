@@ -22,7 +22,7 @@ import { makeTeam } from './battle/engine';
 import { deleteSave, fmtTime, hasSave, loadGame, saveGame, state } from './game/state';
 
 import { advanceDialogue, ask, fade, openOverlay, promptText, say, setHudVisible, toast, ui } from './ui/ui';
-import { openMainMenu, openParty, openShop, openPC, portrait } from './ui/menus';
+import { openMainMenu, openParty, openShop, openPC, portrait, setQualityHandler } from './ui/menus';
 
 registerSW({ immediate: true });
 
@@ -74,6 +74,7 @@ class Game {
       onInteract: (e) => void this.interact(e),
       onTrainerSight: (e) => void this.trainerSight(e),
     });
+    setQualityHandler(() => this.applyQuality());
     this.bindTitle();
     requestAnimationFrame((t) => this.loop(t));
   }
@@ -108,9 +109,20 @@ class Game {
     };
   }
 
+  /** Applique le niveau de détail choisi (ombres + résolution interne). */
+  applyQuality() {
+    this.renderer.setQuality(state.quality);
+    this.overworld.shadows = state.quality === 'haut';
+    this.battleScene.shadows = state.quality === 'haut';
+    if (this.overworld.loaded) {
+      this.overworld.load(this.map, [this.overworld.px, this.overworld.py], this.overworld.facing, this.hiddenSet(), this.beatenSet());
+    }
+  }
+
   private async continueGame() {
     if (!loadGame()) { await say('Sauvegarde illisible.'); return; }
     audio.setMuted(state.muted);
+    this.applyQuality();
     $('#title').hidden = true;
     setHudVisible(true);
     await this.goto(state.zone, { x: state.x, y: state.y, facing: state.facing, silent: true });
@@ -552,6 +564,12 @@ class Game {
     return true;
   }
   debugMode() { return this.mode; }
+  debugQuality(q: 'haut' | 'leger') { state.quality = q; this.applyQuality(); }
+  debugShadows() { return this.renderer.gl.shadowMap.enabled; }
+  debugPerf() {
+    const i = this.renderer.gl.info;
+    return { draws: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures };
+  }
   /** Tente la sortie vers une zone donnée (test du verrouillage par badge). */
   debugTryExit(to: string): boolean {
     const e = this.map.ents.find((x) => x.kind === 'exit' && x.to === to);

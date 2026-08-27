@@ -434,6 +434,9 @@ export function openMainMenu(onClose?: () => void) {
   }, onClose);
 }
 
+let onQualityChange: (() => void) | null = null;
+export function setQualityHandler(fn: () => void) { onQualityChange = fn; }
+
 export function openOptions(onClose?: () => void) {
   openOverlay('Options', (body) => {
     const soundBtn = card((c) => {
@@ -446,6 +449,16 @@ export function openOptions(onClose?: () => void) {
       openOptions(onClose);
     });
     body.append(soundBtn);
+    body.append(card((c) => {
+      c.innerHTML = `<div class="grow"><div class="row1"><span class="nm">Graphismes</span></div>
+        <div class="sub">${state.quality === 'haut' ? 'Élevés — ombres portées, pleine résolution' : 'Légers — sans ombres, meilleure autonomie'}</div></div>`;
+    }, () => {
+      state.quality = state.quality === 'haut' ? 'leger' : 'haut';
+      onQualityChange?.();
+      saveGame();
+      closeOverlay();
+      openOptions(onClose);
+    }));
     body.append(card((c) => {
       c.innerHTML = `<div class="grow"><div class="row1"><span class="nm">Sauvegarder maintenant</span></div><div class="sub">Progression stockée sur l’appareil</div></div>`;
     }, async () => { saveGame(); audio.sfx('item'); toast('Partie sauvegardée !'); }));

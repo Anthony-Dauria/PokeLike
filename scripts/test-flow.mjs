@@ -77,6 +77,8 @@ console.log('-- arène OK');
 await page.evaluate(() => window.pokelike.debugGym('g1'));
 await page.waitForTimeout(1500);
 await adv(6);
+await page.waitForTimeout(900);
+await page.screenshot({ path: `${OUT}/31-combat-arene.png` });
 for (let t = 0; t < 14; t++) {
   if (!(await page.locator('#battle-ui').isVisible())) break;
   // remplacement forcé après un K.O.
@@ -109,6 +111,14 @@ await page.evaluate(() => window.pokelike.debugGoto('sommet-cendre'));
 await page.waitForTimeout(1300);
 await adv(6);
 await page.screenshot({ path: `${OUT}/25-sommet.png` });
+
+// 6a-bis. Routes (hautes herbes) et bord de mer
+for (const [zone, name] of [['route2', '28-route-foret'], ['route4', '29-plage'], ['route7', '30-volcan']]) {
+  await page.evaluate((z) => window.pokelike.debugGoto(z), zone);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${OUT}/${name}.png` });
+}
+console.log('-- routes OK');
 
 // 6b. Interactions (panneau, PNJ, objet, boutique, soins)
 await page.evaluate(() => window.pokelike.debugGoto('serenis'));
@@ -155,6 +165,14 @@ await page.evaluate(() => { window.pokelike.debugGiveBadge('g2'); window.pokelik
 await page.waitForTimeout(1600);
 console.log('  zone avec 2 badges:', await page.evaluate(() => window.pokelike.map.id));
 await adv(6);
+
+// 6d. Bascule des graphismes légers
+await page.evaluate(() => { window.pokelike.debugQuality('leger'); });
+await page.waitForTimeout(1200);
+console.log('  qualité légère → ombres:', await page.evaluate(() => window.pokelike.debugShadows()));
+await page.evaluate(() => { window.pokelike.debugQuality('haut'); });
+await page.waitForTimeout(1200);
+console.log('  qualité élevée → ombres:', await page.evaluate(() => window.pokelike.debugShadows()));
 
 // 7. Sauvegarde / rechargement
 await page.evaluate(() => window.pokelike.debugSave());

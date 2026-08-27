@@ -1,4 +1,8 @@
 import { RNG, hashStr } from '../engine/rng';
+import { TYPE_COLOR } from '../data/types';
+
+/** Convertit une couleur CSS hexadécimale en entier (évite d'importer Three ici). */
+const hexToInt = (hex: string) => parseInt(hex.slice(1), 16);
 import { ZONE, GYM, GYM_BY_TOWN, LEAGUE, FINAL_BOSS, TRAINER_CLASSES, type Dir, type ZoneDef, type Link } from '../data/world';
 
 /* --- codes de tuiles --- */
@@ -26,6 +30,8 @@ export type Ent =
 
 export interface GameMap {
   id: string;
+  /** Teinte dominante d'un intérieur (type de l'Arène, rose des Centres…). */
+  accent?: number;
   name: string;
   w: number;
   h: number;
@@ -378,7 +384,7 @@ function genCenter(zoneId: string, name: string): GameMap {
   ];
   g.rect(5, 2, 4, 1, T.COMPTOIR);
   g.rect(9, 2, 3, 1, T.COMPTOIR);
-  return { id: `in:${zoneId}:center`, name: `${name} — Centre de Soins`, w: 13, h: 11, tiles: g.t, ents, biome: 'interieur', indoor: true, zoneId, spawns: { default: [door[0], door[1] - 1] }, music: 'ville' };
+  return { id: `in:${zoneId}:center`, name: `${name} — Centre de Soins`, accent: 0xff8fb0, w: 13, h: 11, tiles: g.t, ents, biome: 'interieur', indoor: true, zoneId, spawns: { default: [door[0], door[1] - 1] }, music: 'ville' };
 }
 
 function genShop(zoneId: string, name: string, stock: string[]): GameMap {
@@ -389,7 +395,7 @@ function genShop(zoneId: string, name: string, stock: string[]): GameMap {
     { kind: 'shop', x: 6, y: 2, stock },
     { kind: 'npc', x: 10, y: 7, id: 's-npc', name: 'Client', lines: ['Les Sphères, c’est comme les Potions : on n’en a jamais assez.'], color: 0xffd166, face: 3 },
   ];
-  return { id: `in:${zoneId}:shop`, name: `${name} — Boutique`, w: 13, h: 11, tiles: g.t, ents, biome: 'interieur', indoor: true, zoneId, spawns: { default: [door[0], door[1] - 1] }, music: 'ville' };
+  return { id: `in:${zoneId}:shop`, name: `${name} — Boutique`, accent: 0x4fb0e0, w: 13, h: 11, tiles: g.t, ents, biome: 'interieur', indoor: true, zoneId, spawns: { default: [door[0], door[1] - 1] }, music: 'ville' };
 }
 
 function genHouse(zoneId: string, idx: number, label: string, lines: string[]): GameMap {
@@ -398,7 +404,7 @@ function genHouse(zoneId: string, idx: number, label: string, lines: string[]): 
     { kind: 'exit', x: door[0], y: door[1], dir: 's', to: zoneId, link: { to: zoneId } },
     { kind: 'npc', x: 5, y: 3, id: `${zoneId}-h${idx}`, name: label, lines, color: 0xff9f6e, face: 2 },
   ];
-  return { id: `in:${zoneId}:house${idx}`, name: label, w: 11, h: 9, tiles: g.t, ents, biome: 'interieur', indoor: true, zoneId, spawns: { default: [door[0], door[1] - 1] }, music: 'ville' };
+  return { id: `in:${zoneId}:house${idx}`, name: label, accent: 0xd8a24f, w: 11, h: 9, tiles: g.t, ents, biome: 'interieur', indoor: true, zoneId, spawns: { default: [door[0], door[1] - 1] }, music: 'ville' };
 }
 
 function genGym(gymId: string): GameMap {
@@ -435,7 +441,7 @@ function genGym(gymId: string): GameMap {
   ents.push({ kind: 'sign', x: 4, y: h - 3, text: `${gym.name}\nChampion : ${gym.leader}\nSpécialité : ${gym.type}` });
   const key: [number, number][] = [[door[0], door[1] - 1], [6, 4], ...ents.filter((e) => e.kind === 'trainer').map((e) => [e.x, e.y] as [number, number])];
   ensureConnected(g, key);
-  return { id: `gym:${gymId}`, name: gym.name, w, h, tiles: g.t, ents, biome: 'interieur', indoor: true, zoneId: gym.town, spawns: { default: [door[0], door[1] - 1] }, music: 'arene' };
+  return { id: `gym:${gymId}`, name: gym.name, accent: hexToInt(TYPE_COLOR[gym.type]), w, h, tiles: g.t, ents, biome: 'interieur', indoor: true, zoneId: gym.town, spawns: { default: [door[0], door[1] - 1] }, music: 'arene' };
 }
 
 function genLeagueRoom(index: number): GameMap {
