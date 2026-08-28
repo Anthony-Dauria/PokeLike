@@ -64,7 +64,7 @@ export class BattleScene {
       addOutline(rig, .05);
       return rig;
     }
-    const { tex, side } = this.sprites.sprite(sp, facing, shiny);
+    const { tex, side, height } = this.sprites.sprite(sp, facing, shiny);
     const geo = new THREE.PlaneGeometry(side, side);
     geo.translate(0, side / 2, 0);
     const mat = new THREE.MeshBasicMaterial({
@@ -74,10 +74,19 @@ export class BattleScene {
     const group = new THREE.Group();
     group.add(mesh);
     // Si le joueur a fourni une image pour cette espèce, elle remplace la cuisson.
-    void this.sprites.pack(sp, facing).then((t) => {
-      if (!t || mat.map === t) return;
-      mat.map = t;
+    void this.sprites.pack(sp, facing).then((p) => {
+      if (!p || mat.map === p.tex) return;
+      mat.map = p.tex;
+      // Les packs ont souvent un liseré semi-transparent : un seuil plus bas le garde.
+      mat.alphaTest = .2;
       mat.needsUpdate = true;
+      // L'image est recadrée sur la créature : on redonne au panneau la hauteur du
+      // modèle et son propre rapport, sinon le sprite flotte ou paraît écrasé.
+      const w = height * p.aspect;
+      const plan = new THREE.PlaneGeometry(w, height);
+      plan.translate(0, height / 2, 0);
+      mesh.geometry.dispose();
+      mesh.geometry = plan;
     });
     return { group, bob: [mesh], limbs: [], height: side };
   }

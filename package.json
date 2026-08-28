@@ -15,6 +15,7 @@
     "test": "npm run build && npm run test:smoke && npm run test:battle && npm run test:flow && npm run test:sprites",
     "pokedex": "node scripts/gen-pokedex.mjs",
     "test:sprites": "node scripts/test-sprites.mjs",
+    "sprites": "node scripts/get-sprites.mjs",
     "sprites:demo": "node scripts/gen-test-sprites.mjs",
     "shots:mons": "node scripts/shot-mons.mjs"
   },

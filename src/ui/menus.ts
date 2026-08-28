@@ -1,6 +1,6 @@
 import { TYPE_COLOR } from '../data/types';
 import { ITEMS, item as getItem, type Item } from '../data/items';
-import { DEX, species } from '../data/species';
+import { DEX, species, type Species } from '../data/species';
 import { move as getMove } from '../data/moves';
 import { STATUS_LABEL } from '../data/moves';
 import { GYMS } from '../data/world';
@@ -130,6 +130,8 @@ export function openMonDetail(m: Mon, back?: () => void) {
       ['Expérience', `${Math.round(xpProgress(m) * 100)} % vers N.${Math.min(100, m.lv + 1)}`],
       ['Rencontré à', m.metAt],
     ];
+    const evo = evolutionLine(sp);
+    if (evo) rows.splice(rows.length - 1, 0, ['Évolution', evo.replace(/^Évolution au niveau /, 'Niveau ')]);
     for (const [k, v] of rows) {
       const line = document.createElement('div');
       line.className = 'stat-line';
@@ -345,6 +347,85 @@ export function openPC(onClose?: () => void) {
   }, onClose);
 }
 
+/* -------------------- évolution -------------------- */
+/**
+ * Ligne d'évolution du Dex. Visible uniquement pour une espèce capturée :
+ * le niveau est révélé même quand la forme suivante est encore inconnue.
+ */
+export function evolutionLine(sp: Species): string | null {
+  if (!state.caught.has(sp.id)) return null;
+  if (!sp.evo) return 'Stade final — n’évolue plus.';
+  const known = (id: string) => state.caught.has(id) || state.seen.has(id);
+  const cibles = sp.evoAlt ?? [sp.evo.to];
+  const noms = cibles.map((id) => (known(id) ? species(id).name : '???'));
+  return cibles.length > 1
+    ? `Évolution au niveau ${sp.evo.lv} — ${cibles.length} formes : ${noms.join(', ')}`
+    : `Évolution au niveau ${sp.evo.lv} → ${noms[0]}`;
+}
+
+/** Fiche détaillée d'une espèce du Dex. */
+export function openDexEntry(sp: Species, back?: () => void) {
+  const caught = state.caught.has(sp.id);
+  openOverlay(`N°${String(sp.dex).padStart(3, '0')} ${sp.name}`, (body) => {
+    const head = document.createElement('div');
+    head.className = 'card';
+    head.append(portrait(sp.id));
+    const g = document.createElement('div');
+    g.className = 'grow';
+    const r = document.createElement('div');
+    r.className = 'row1';
+    r.innerHTML = `<span class="nm">${sp.name}</span>`;
+    for (const t of sp.types) r.append(typeChip(t));
+    g.append(r);
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = `Génération ${sp.gen || '—'} · ${caught ? 'capturé' : 'aperçu seulement'}`;
+    g.append(sub);
+    head.append(g);
+    body.append(head);
+
+    body.append(section('Évolution'));
+    const evoBox = document.createElement('div');
+    evoBox.className = 'card';
+    evoBox.style.display = 'block';
+    const line = evolutionLine(sp);
+    evoBox.innerHTML = `<div class="sub" style="margin:0">${line ?? 'Capturez cette espèce pour connaître son évolution.'}</div>`;
+    body.append(evoBox);
+
+    if (caught) {
+      body.append(section('Statistiques de base'));
+      const box = document.createElement('div');
+      box.className = 'card';
+      box.style.display = 'block';
+      const rows: [string, number][] = [
+        ['PV', sp.base.hp], ['Attaque', sp.base.atk], ['Défense', sp.base.def],
+        ['Atq. Spé.', sp.base.spa], ['Déf. Spé.', sp.base.spd], ['Vitesse', sp.base.spe],
+      ];
+      for (const [k, v] of rows) {
+        const line2 = document.createElement('div');
+        line2.className = 'stat-line';
+        line2.innerHTML = `<span>${k}</span><b>${v}</b>`;
+        const bar = document.createElement('div');
+        bar.className = 'mini-hp';
+        bar.style.margin = '0 0 6px';
+        const i = document.createElement('i');
+        i.style.width = `${Math.min(100, (v / 160) * 100)}%`;
+        i.style.background = v >= 110 ? 'var(--ok)' : v >= 70 ? 'var(--warn)' : 'var(--bad)';
+        bar.append(i);
+        box.append(line2, bar);
+      }
+      body.append(box);
+    }
+
+    body.append(section('Description'));
+    const p = document.createElement('p');
+    p.className = 'sub';
+    p.style.margin = '0 6px';
+    p.textContent = caught ? sp.flavor : 'Données incomplètes : cette espèce n’a été qu’aperçue.';
+    body.append(p);
+  }, back);
+}
+
 /* -------------------- Dex -------------------- */
 export function openDex(onClose?: () => void) {
   openOverlay(`Dex — ${state.caught.size}/${DEX.length}`, (body) => {
@@ -369,8 +450,16 @@ export function openDex(onClose?: () => void) {
         d.className = 'sub';
         d.textContent = caught ? sp.flavor : 'Aperçu seulement.';
         g.append(d);
+        const evo = evolutionLine(sp);
+        if (evo) {
+          const e = document.createElement('div');
+          e.className = 'sub';
+          e.style.color = 'var(--acc)';
+          e.textContent = evo;
+          g.append(e);
+        }
         c.append(g);
-      }, seen ? () => void say(`${sp.name}\n${sp.flavor}`) : undefined, !seen));
+      }, seen ? () => openDexEntry(sp, () => openDex(onClose)) : undefined, !seen));
     }
   }, onClose);
 }

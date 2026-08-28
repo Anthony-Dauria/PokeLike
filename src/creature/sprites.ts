@@ -10,7 +10,53 @@ const SIZE = 192;
 /** Nombre de textures gardées en mémoire vidéo (≈ 64 Ko pièce). */
 const CACHE_MAX = 64;
 
-interface Baked { tex: THREE.Texture; target: THREE.WebGLRenderTarget | null; side: number }
+interface Baked { tex: THREE.Texture; target: THREE.WebGLRenderTarget | null; side: number; height: number }
+
+/** Image fournie par un pack : texture recadrée + rapport largeur/hauteur du sujet. */
+export interface PackSprite { tex: THREE.Texture; aspect: number }
+
+/** Contexte 2D jetable, hors écran si la plateforme le permet. */
+function ctx2d(w: number, h: number) {
+  try {
+    if (typeof OffscreenCanvas !== 'undefined') {
+      return new OffscreenCanvas(w, h).getContext('2d', { willReadFrequently: true });
+    }
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c.getContext('2d', { willReadFrequently: true });
+  } catch { return null; }
+}
+
+/**
+ * Recadre une image sur ses pixels opaques. Les packs cadrent en général dans un
+ * carré fixe avec beaucoup de vide autour : sans ce rognage, une petite espèce
+ * flotte au-dessus de la plateforme et paraît deux fois trop petite.
+ */
+async function trimAlpha(bmp: ImageBitmap): Promise<{ bmp: ImageBitmap; aspect: number }> {
+  const plein = { bmp, aspect: bmp.width / bmp.height || 1 };
+  const ctx = ctx2d(bmp.width, bmp.height);
+  if (!ctx) return plein;
+  try {
+    ctx.drawImage(bmp, 0, 0);
+    const { data, width: w, height: h } = ctx.getImageData(0, 0, bmp.width, bmp.height);
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] <= 8) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    if (x1 < x0 || y1 < y0) return plein;                       // image entièrement vide
+    const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+    if (cw === w && ch === h) return plein;                     // déjà au plus juste
+    const cut = await createImageBitmap(bmp, x0, y0, cw, ch);
+    bmp.close();
+    return { bmp: cut, aspect: cw / ch };
+  } catch { return plein; }                                     // canvas indisponible ou souillé
+}
 
 /**
  * Fournit une texture pour chaque espèce :
@@ -20,7 +66,7 @@ interface Baked { tex: THREE.Texture; target: THREE.WebGLRenderTarget | null; si
 export class CreatureSprites {
   private cache = new Map<string, Baked>();
   private order: string[] = [];
-  private packHit = new Map<string, THREE.Texture>();
+  private packHit = new Map<string, PackSprite>();
   private packMiss = new Set<string>();
   /** Liste éventuelle fournie par le pack ; `null` = pas de manifeste. */
   private manifest: Promise<Set<number> | null> | null = null;
@@ -100,7 +146,7 @@ export class CreatureSprites {
 
     this.scene.remove(rig.group);
 
-    const baked: Baked = { tex: target.texture, target, side };
+    const baked: Baked = { tex: target.texture, target, side, height: size.y || side };
     this.cache.set(k, baked);
     this.order.push(k);
     this.trim();
@@ -116,10 +162,10 @@ export class CreatureSprites {
     }
   }
 
-  /** Texture immédiate (cuisson) + côté du carré en unités monde. */
-  sprite(sp: Species, facing: Facing, shiny: boolean): { tex: THREE.Texture; side: number } {
+  /** Texture immédiate (cuisson), côté du carré et hauteur réelle du modèle, en unités monde. */
+  sprite(sp: Species, facing: Facing, shiny: boolean): { tex: THREE.Texture; side: number; height: number } {
     const b = this.bake(sp, facing, shiny);
-    return { tex: b.tex, side: b.side };
+    return { tex: b.tex, side: b.side, height: b.height };
   }
 
   /** Lit `sprites/index.json` une seule fois, s'il existe. */
@@ -140,7 +186,7 @@ export class CreatureSprites {
    * Cherche une image fournie par le joueur. Résout `null` s'il n'y en a pas.
    * `back/<dex>.png` est optionnel : on retombe sur la vue de face.
    */
-  async pack(sp: Species, facing: Facing): Promise<THREE.Texture | null> {
+  async pack(sp: Species, facing: Facing): Promise<PackSprite | null> {
     if (sp.custom || this.packOff) return null;    // espèces maison : pas de pack attendu
     const listed = await this.loadManifest();
     if (listed && !listed.has(sp.dex)) return null;
@@ -159,16 +205,17 @@ export class CreatureSprites {
           if (!listed && ++this.misses >= 3) this.packOff = true;
           continue;
         }
-        const bmp = await createImageBitmap(await res.blob());
+        const { bmp, aspect } = await trimAlpha(await createImageBitmap(await res.blob()));
         const tex = new THREE.Texture(bmp);
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.magFilter = tex.minFilter = THREE.NearestFilter;
         tex.generateMipmaps = false;
         tex.needsUpdate = true;
         tex.userData.src = 'pack';
-        this.packHit.set(path, tex);
+        const hit: PackSprite = { tex, aspect };
+        this.packHit.set(path, hit);
         this.misses = 0;
-        return tex;
+        return hit;
       } catch {
         this.packMiss.add(path);
         if (!listed && ++this.misses >= 3) this.packOff = true;
@@ -179,7 +226,7 @@ export class CreatureSprites {
 
   dispose() {
     for (const b of this.cache.values()) b.target?.dispose();
-    for (const t of this.packHit.values()) t.dispose();
+    for (const p of this.packHit.values()) p.tex.dispose();
     this.cache.clear();
     this.order = [];
   }
