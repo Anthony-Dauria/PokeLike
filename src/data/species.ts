@@ -12,6 +12,9 @@ export type Feat =
   // Motifs : appliqués par-dessus la silhouette pour distinguer les espèces proches.
   | 'bands' | 'dots' | 'mask' | 'rings';
 
+export type EyeStyle = 'round' | 'beady' | 'sharp' | 'sleepy' | 'blank' | 'slit';
+export type MouthStyle = 'none' | 'smile' | 'fangs' | 'beak' | 'grin';
+
 /** Forme brute produite par le générateur (src/data/pokedex.gen.ts). */
 export interface RawSpecies {
   dex: number;
@@ -26,6 +29,14 @@ export interface RawSpecies {
   accent?: string;
   catchRate: number;
   gen: number;
+  /* --- traits de visage et proportions : ce qui différencie deux espèces
+         partageant la même silhouette --- */
+  eyes?: EyeStyle;
+  mouth?: MouthStyle;
+  eyeColor?: string;
+  eyeScale?: number;
+  headScale?: number;
+  legScale?: number;
   evo?: { to: string; lv: number };
   /** Plusieurs évolutions possibles (Évoli) : le joueur choisit. */
   evoAlt?: string[];
@@ -50,7 +61,8 @@ const CUSTOM: RawSpecies[] = [
     dex: 1101, id: 'brasillon', name: 'Brasillon', types: ['Feu'],
     base: { hp: 45, atk: 62, def: 48, spa: 60, spd: 48, spe: 62 },
     shape: 'quad', feats: ['tail', 'ears', 'flame'], scale: .8, body: '#e8763a', accent: '#f7d9a0',
-    catchRate: 45, gen: 0, evo: { to: 'cendrailes', lv: 16 },
+    catchRate: 45, gen: 0,
+    eyes: 'round', mouth: 'fangs', eyeScale: 1.1, evo: { to: 'cendrailes', lv: 16 },
     sig: [[1, 'griffe'], [4, 'flammeche'], [10, 'morsure'], [14, 'crocsfeu']],
     flavor: 'La braise de sa gorge ne s’éteint jamais, même sous la pluie.',
   },
@@ -58,7 +70,8 @@ const CUSTOM: RawSpecies[] = [
     dex: 1102, id: 'cendrailes', name: 'Cendrailes', types: ['Feu'],
     base: { hp: 62, atk: 80, def: 62, spa: 80, spd: 62, spe: 85 },
     shape: 'quad', feats: ['tail', 'wings', 'claws', 'flame'], scale: 1.05, body: '#e0603a', accent: '#f2c07a',
-    catchRate: 45, gen: 0, evo: { to: 'pyrodrakon', lv: 36 },
+    catchRate: 45, gen: 0,
+    eyes: 'sharp', mouth: 'fangs', evo: { to: 'pyrodrakon', lv: 36 },
     sig: [[18, 'dansedracau'], [24, 'lanceflam'], [30, 'dracogriffe']],
     flavor: 'Ses ailes naissantes crachent des cendres brûlantes quand il s’élance.',
   },
@@ -67,6 +80,7 @@ const CUSTOM: RawSpecies[] = [
     base: { hp: 84, atk: 104, def: 82, spa: 108, spd: 84, spe: 98 },
     shape: 'dragon', feats: ['wings', 'horn', 'tail', 'claws', 'flame'], scale: 1.6, body: '#e0552f', accent: '#f0b45a',
     catchRate: 45, gen: 0,
+    eyes: 'sharp', mouth: 'fangs', eyeColor: '#f0d05a',
     sig: [[36, 'dracochoc'], [42, 'coleredragon'], [50, 'deflagration'], [58, 'boutefeu']],
     flavor: 'Un dragon de forge dont le rugissement fait fondre la roche.',
   },
@@ -74,7 +88,8 @@ const CUSTOM: RawSpecies[] = [
     dex: 1104, id: 'ondulin', name: 'Ondulin', types: ['Eau'],
     base: { hp: 50, atk: 50, def: 52, spa: 62, spd: 58, spe: 53 },
     shape: 'fish', feats: ['fins', 'tail'], scale: .72, body: '#5fb0e0', accent: '#cfe9f7',
-    catchRate: 45, gen: 0, evo: { to: 'brumaspectre', lv: 16 },
+    catchRate: 45, gen: 0,
+    eyes: 'round', mouth: 'smile', eyeScale: 1.15, evo: { to: 'brumaspectre', lv: 16 },
     sig: [[1, 'pistoleau'], [7, 'bulledeau'], [12, 'lechouille']],
     flavor: 'On dit que les gouttes qu’il laisse derrière lui murmurent la nuit.',
   },
@@ -82,7 +97,8 @@ const CUSTOM: RawSpecies[] = [
     dex: 1105, id: 'brumaspectre', name: 'Brumaspectre', types: ['Eau', 'Spectre'],
     base: { hp: 66, atk: 66, def: 68, spa: 84, spd: 78, spe: 69 },
     shape: 'ghost', feats: ['fins', 'aura'], scale: 1.05, body: '#5f9ac8', accent: '#b8e0f0',
-    catchRate: 45, gen: 0, evo: { to: 'abyssire', lv: 36 },
+    catchRate: 45, gen: 0,
+    eyes: 'blank', mouth: 'none', eyeColor: '#b8e0f0', evo: { to: 'abyssire', lv: 36 },
     sig: [[18, 'ball-ombre'], [24, 'surf'], [30, 'hantise']],
     flavor: 'Sa brume glacée dissimule des silhouettes qui n’existent pas.',
   },
@@ -91,6 +107,7 @@ const CUSTOM: RawSpecies[] = [
     base: { hp: 88, atk: 86, def: 92, spa: 112, spd: 104, spe: 78 },
     shape: 'ghost', feats: ['fins', 'aura', 'crest', 'mane'], scale: 1.5, body: '#4f7fb8', accent: '#9fd8ee',
     catchRate: 45, gen: 0,
+    eyes: 'blank', mouth: 'grin', eyeColor: '#9fd8ee',
     sig: [[36, 'maremortelle'], [44, 'hydrocanon'], [52, 'hantise'], [58, 'plenitude']],
     flavor: 'Gardien des épaves. Son chant attire les marins vers les abysses.',
   },
@@ -98,7 +115,8 @@ const CUSTOM: RawSpecies[] = [
     dex: 1107, id: 'germinuit', name: 'Germinuit', types: ['Plante'],
     base: { hp: 52, atk: 58, def: 56, spa: 56, spd: 54, spe: 49 },
     shape: 'plantoid', feats: ['crest', 'tuft'], scale: .72, body: '#6fbf6a', accent: '#3f7a52',
-    catchRate: 45, gen: 0, evo: { to: 'sylvombre', lv: 16 },
+    catchRate: 45, gen: 0,
+    eyes: 'round', mouth: 'smile', evo: { to: 'sylvombre', lv: 16 },
     sig: [[1, 'fouetlia'], [7, 'tranchherb'], [13, 'morsure']],
     flavor: 'Sa pousse ne s’ouvre qu’à la tombée de la nuit.',
   },
@@ -106,7 +124,8 @@ const CUSTOM: RawSpecies[] = [
     dex: 1108, id: 'sylvombre', name: 'Sylvombre', types: ['Plante', 'Ténèbres'],
     base: { hp: 70, atk: 82, def: 74, spa: 72, spd: 70, spe: 63 },
     shape: 'biped', feats: ['crest', 'claws', 'fangs'], scale: 1.05, body: '#569a5f', accent: '#33604a',
-    catchRate: 45, gen: 0, evo: { to: 'nocteracine', lv: 36 },
+    catchRate: 45, gen: 0,
+    eyes: 'sharp', mouth: 'fangs', eyeColor: '#f0d05a', evo: { to: 'nocteracine', lv: 36 },
     sig: [[18, 'vibrobscur'], [24, 'lamefeuille'], [30, 'danselame']],
     flavor: 'Il se fond dans l’ombre des futaies et n’en sort que pour frapper.',
   },
@@ -115,6 +134,7 @@ const CUSTOM: RawSpecies[] = [
     base: { hp: 92, atk: 112, def: 96, spa: 86, spd: 92, spe: 82 },
     shape: 'humanoid', feats: ['crest', 'claws', 'spikes', 'mane'], scale: 1.5, body: '#3f7f4f', accent: '#2a4a3a',
     catchRate: 45, gen: 0,
+    eyes: 'sharp', mouth: 'fangs', eyeColor: '#e8544f', headScale: .9,
     sig: [[36, 'ronceombre'], [44, 'nuitnoire'], [52, 'lancesoleil'], [58, 'closecombat']],
     flavor: 'Ses racines drainent la lumière ; la forêt autour de lui reste noire.',
   },

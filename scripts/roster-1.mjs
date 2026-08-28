@@ -74,5 +74,5 @@ export default [
   ['tyranitar',  'biped',    'spikes+horn+claws+shell',1.7,'#5f9a6f', '#3f6f4f'],
   ['lugia',      'dragon',   'wings+crest+tail+aura',1.9,  '#e8f0f8', '#6f8fd0'],
   ['espeon',     'quad',     'ears+tail+aura+crest+rings', 0.95, '#d8a8d0', '#e8544f'],
-  ['umbreon',    'quad',     'ears+tail+aura+mask+rings',       0.95, '#3f4256', '#f2d84f'],
+  ['umbreon',    'quad',     'ears+tail+rings',             0.95, '#3f4256', '#f2d84f'],
 ];

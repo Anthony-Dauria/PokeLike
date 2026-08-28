@@ -105,7 +105,7 @@ Quatre **légendaires itinérants** (Ignivore, Abyssaltar, Sylvanor, Chronoss) n
 En combat, chaque créature est un **sprite plat** posé sur sa plateforme — la présentation des jeux DS. La texture vient de la première source disponible :
 
 1. **Votre pack** — `public/sprites/<numéro national>.png` (et `back/<n>.png` pour la vue de dos). Rien n'est livré ni téléchargé : le dossier est vide et ignoré par git, vous y déposez ce que vous voulez. Un `index.json` optionnel évite les requêtes inutiles. Voir `public/sprites/LISEZMOI.md`.
-2. **Cuisson du modèle 3D** — sinon, le modèle procédural est rendu une fois hors écran en 128×128, contour compris, et la texture est réutilisée (cache de 64, vue de face et vue de dos). C'est ce que vous voyez par défaut.
+2. **Cuisson du modèle 3D** — sinon, le modèle procédural est rendu une fois hors écran en 192×192 (contour et contre-jour compris) et la texture est réutilisée : cache de 64, vue de face et vue de dos en trois-quarts. C'est ce que vous voyez par défaut.
 
 Le réglage **Créatures : Sprites / Modèles 3D** (Options) bascule entre les billboards et les modèles animés en volume.
 
@@ -125,7 +125,9 @@ Par-dessous, le moteur reste du cel-shading :
 - **Ombrage toon** (`MeshToonMaterial` + rampe de dégradé) sur tout ce qui est affiché, avec un ciel en dôme dégradé et un brouillard calé sur la couleur d'horizon.
 - **Ombres portées** temps réel : le soleil suit le joueur pour garder une carte d'ombre nette autour de lui.
 - **Contour façon dessin animé** sur les créatures — coque inversée décalée *en espace vue*, donc d'épaisseur constante quelle que soit la taille des pièces du modèle.
-- **Silhouette dérivée des statistiques** : les gros PV s'épaississent, la Vitesse affine et allonge. Appliqué automatiquement aux 217 espèces.
+- **Visage paramétrable** — c'est lui qui distingue le plus deux créatures de même silhouette : cinq regards (rond, perlé, dur, mi-clos, vide, fendu), quatre bouches (sourire, crocs, bec, rictus), couleur d'iris et taille des yeux par espèce. Les valeurs par défaut découlent de la silhouette ; une centaine d'espèces ont un réglage écrit à la main dans `scripts/roster-traits.mjs`.
+- **Silhouette dérivée des statistiques** : les gros PV s'épaississent, la Vitesse affine et allonge. Appliqué automatiquement aux 217 espèces. Taille de tête et longueur de pattes réglables par espèce.
+- **Surface selon le type** : facettée pour Roche, Sol et Acier (variantes de géométrie à normales plates), légèrement translucide pour Glace et Spectre.
 - **Motifs** (bandes, taches, masque, anneaux) posés par-dessus la silhouette pour distinguer les espèces proches.
 - **Terrain vallonné** : champ de hauteur bruité partagé aux coins des tuiles (donc sans fissure), aplati sous les chemins et les bâtiments, avec occlusion douce près des obstacles.
 - **Couleurs fondues par famille de surface** : les nuances d'herbe se mélangent entre voisines, tandis que chemins, hautes herbes et rives gardent un bord net — les zones de rencontre restent lisibles d'un coup d'œil.
@@ -182,6 +184,7 @@ npm run test:flow       # cohérence du Pokédex, 114 cartes, arène, boutique, 
 npm run test:sprites    # cuisson des modèles ET chargement d'un pack (pack factice généré à la volée)
 ```
 
+`npm run shots:mons` capture quelques espèces en combat pour juger le rendu à l'œil.
 `npm run sprites:demo` fabrique un petit pack de démonstration (silhouettes colorées générées par le script, aucune image Pokémon) pour voir le mécanisme à l'œuvre.
 
 Les captures d'écran atterrissent dans `screenshots/`. Sur une machine où Chromium

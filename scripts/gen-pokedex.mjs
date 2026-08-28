@@ -9,6 +9,7 @@ import pokemonNames from 'pokemon';
 import roster1 from './roster-1.mjs';
 import roster2 from './roster-2.mjs';
 import roster3 from './roster-3.mjs';
+import TRAITS from './roster-traits.mjs';
 
 const dex = Dex.forGen(9);
 const ROSTER = [...roster1, ...roster2, ...roster3];
@@ -86,10 +87,42 @@ const FLAVOR = {
   koraidon: 'Une forme ancienne, surgie d’un passé que personne n’a documenté.',
 };
 
+/** Regard et bouche par défaut, déduits de la silhouette. */
+const FACE_DEFAULT = {
+  insect:   { eyes: 'beady',  mouth: 'none' },
+  bird:     { eyes: 'beady',  mouth: 'beak' },
+  bat:      { eyes: 'sharp',  mouth: 'fangs' },
+  ghost:    { eyes: 'blank',  mouth: 'grin' },
+  golem:    { eyes: 'blank',  mouth: 'none' },
+  dragon:   { eyes: 'slit',   mouth: 'fangs' },
+  serpent:  { eyes: 'slit',   mouth: 'none' },
+  fish:     { eyes: 'round',  mouth: 'none' },
+  turtle:   { eyes: 'round',  mouth: 'smile' },
+  blob:     { eyes: 'round',  mouth: 'smile' },
+  plantoid: { eyes: 'round',  mouth: 'smile' },
+  humanoid: { eyes: 'sharp',  mouth: 'none' },
+  biped:    { eyes: 'round',  mouth: 'none' },
+  quad:     { eyes: 'round',  mouth: 'none' },
+};
+
+/** Analyse la 7e colonne facultative : « eyes:sharp mouth:fangs head:1.2 ». */
+function parseTraits(str) {
+  const out = {};
+  for (const tok of (str ?? '').split(/\s+/).filter(Boolean)) {
+    const [k, v] = tok.split(':');
+    if (k === 'eyes' || k === 'mouth') out[k] = v;
+    else if (k === 'eye') out.eyeColor = v;
+    else if (k === 'eyeScale' || k === 'head' || k === 'legs') {
+      out[k === 'head' ? 'headScale' : k === 'legs' ? 'legScale' : 'eyeScale'] = Number(v);
+    } else warnings.push(`trait inconnu : ${tok}`);
+  }
+  return out;
+}
+
 const rows = [];
 const warnings = [];
 
-for (const [id, shape, featStr, scale, body, accent] of ROSTER) {
+for (const [id, shape, featStr, scale, body, accent, traitStr] of ROSTER) {
   const sp = dex.species.get(id);
   if (!sp || !sp.exists) { warnings.push(`espèce introuvable : ${id}`); continue; }
 
@@ -120,12 +153,23 @@ for (const [id, shape, featStr, scale, body, accent] of ROSTER) {
   const flavor = FLAVOR[id] ?? FLAVOR[id.replace(/-/g, '_')]
     ?? `${types.join('/')} · ${sp.weightkg} kg · Génération ${sp.gen}.`;
 
+  const face = {
+    ...(FACE_DEFAULT[shape] ?? { eyes: 'round', mouth: 'none' }),
+    ...parseTraits(TRAITS[id]),
+    ...parseTraits(traitStr),
+  };
+
   rows.push({
-    dex: sp.num, id, name: nameFr ?? sp.name, types,
+    dex: sp.num, id, name: nameFr ?? sp.name, types, ...face,
     base: { hp: sp.baseStats.hp, atk: sp.baseStats.atk, def: sp.baseStats.def, spa: sp.baseStats.spa, spd: sp.baseStats.spd, spe: sp.baseStats.spe },
     shape, feats: featStr ? featStr.split('+') : [], scale, body, accent,
     catchRate, evo, evoAlt, legend, gen: sp.gen, flavor,
   });
+}
+
+// Un trait écrit pour une espèce absente du roster est une coquille : on le signale.
+for (const id of Object.keys(TRAITS)) {
+  if (!IDS.has(id)) warnings.push(`trait pour une espèce hors roster : ${id}`);
 }
 
 rows.sort((a, b) => a.dex - b.dex);
@@ -139,7 +183,12 @@ const lines = rows.map((r) => {
     `shape: ${q(r.shape)}`, `feats: [${r.feats.map(q).join(', ')}]`,
     `scale: ${r.scale}`, `body: ${q(r.body)}`, `accent: ${q(r.accent)}`,
     `catchRate: ${r.catchRate}`, `gen: ${r.gen}`,
+    `eyes: ${q(r.eyes)}`, `mouth: ${q(r.mouth)}`,
   ];
+  if (r.eyeColor) parts.push(`eyeColor: ${q(r.eyeColor)}`);
+  if (r.eyeScale) parts.push(`eyeScale: ${r.eyeScale}`);
+  if (r.headScale) parts.push(`headScale: ${r.headScale}`);
+  if (r.legScale) parts.push(`legScale: ${r.legScale}`);
   if (r.evo) parts.push(`evo: { to: ${q(r.evo.to)}, lv: ${r.evo.lv} }`);
   if (r.evoAlt) parts.push(`evoAlt: [${r.evoAlt.map(q).join(', ')}]`);
   if (r.legend) parts.push('legend: true');

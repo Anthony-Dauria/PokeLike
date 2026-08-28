@@ -4,8 +4,9 @@ import { addOutline, buildCreature } from './model';
 
 export type Facing = 'front' | 'back';
 
-/** Taille des sprites cuits : proche des 96 px des jeux DS. */
-const SIZE = 128;
+/** Taille des sprites cuits. Au-dessus des 96 px de la DS pour que les
+ *  détails de visage survivent à la réduction finale. */
+const SIZE = 192;
 /** Nombre de textures gardées en mémoire vidéo (≈ 64 Ko pièce). */
 const CACHE_MAX = 64;
 
@@ -31,11 +32,14 @@ export class CreatureSprites {
 
   constructor(private gl: THREE.WebGLRenderer) {
     const hemi = new THREE.HemisphereLight(0xd8e8ff, 0x6a6250, .75);
-    const key = new THREE.DirectionalLight(0xfff6e0, 1.15);
+    const key = new THREE.DirectionalLight(0xfff6e0, 1.1);
     key.position.set(4, 6, 8);
-    const fill = new THREE.DirectionalLight(0xbcd4f0, .35);
+    const fill = new THREE.DirectionalLight(0xbcd4f0, .3);
     fill.position.set(-5, 2, -4);
-    this.scene.add(hemi, key, fill);
+    // Contre-jour : détache la silhouette et souligne le relief du dos.
+    const rim = new THREE.DirectionalLight(0xdCE8ff, .55);
+    rim.position.set(-3, 5, -7);
+    this.scene.add(hemi, key, fill, rim);
   }
 
   private key(sp: Species, facing: Facing, shiny: boolean) {
@@ -67,7 +71,7 @@ export class CreatureSprites {
     // De dos, on prend plus de hauteur : sinon la tête disparaît derrière le corps.
     const dir = facing === 'front'
       ? new THREE.Vector3(.28, .26, 1).normalize()
-      : new THREE.Vector3(-.24, .55, -1).normalize();
+      : new THREE.Vector3(-.62, .48, -1).normalize();   // trois-quarts arrière : la tête reste lisible
     this.cam.left = -side / 2; this.cam.right = side / 2;
     this.cam.top = side / 2; this.cam.bottom = -side / 2;
     this.cam.near = .01; this.cam.far = side * 6;
