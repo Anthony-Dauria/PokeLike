@@ -451,6 +451,16 @@ export function openOptions(onClose?: () => void) {
     });
     body.append(soundBtn);
     body.append(card((c) => {
+      c.innerHTML = `<div class="grow"><div class="row1"><span class="nm">Créatures</span></div>
+        <div class="sub">${state.creatures === 'sprites' ? 'Sprites plats — présentation DS' : 'Modèles 3D en combat'}</div></div>`;
+    }, () => {
+      state.creatures = state.creatures === 'sprites' ? '3d' : 'sprites';
+      onQualityChange?.();
+      saveGame();
+      closeOverlay();
+      openOptions(onClose);
+    }));
+    body.append(card((c) => {
       c.innerHTML = `<div class="grow"><div class="row1"><span class="nm">Rendu</span></div>
         <div class="sub">${state.style === 'ds' ? 'Écran DS — basse définition, palette 15 bits' : 'Lisse — pleine définition'}</div></div>`;
     }, () => {

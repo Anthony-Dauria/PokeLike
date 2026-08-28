@@ -1,0 +1,182 @@
+import * as THREE from 'three';
+import type { Species } from '../data/species';
+import { addOutline, buildCreature } from './model';
+
+export type Facing = 'front' | 'back';
+
+/** Taille des sprites cuits : proche des 96 px des jeux DS. */
+const SIZE = 128;
+/** Nombre de textures gardées en mémoire vidéo (≈ 64 Ko pièce). */
+const CACHE_MAX = 64;
+
+interface Baked { tex: THREE.Texture; target: THREE.WebGLRenderTarget | null; side: number }
+
+/**
+ * Fournit une texture pour chaque espèce :
+ *   1. `public/sprites/<dex>.png` si le joueur a déposé un pack (rien n'est livré avec le jeu) ;
+ *   2. sinon, le modèle 3D procédural est rendu une fois hors écran et réutilisé.
+ */
+export class CreatureSprites {
+  private cache = new Map<string, Baked>();
+  private order: string[] = [];
+  private packHit = new Map<string, THREE.Texture>();
+  private packMiss = new Set<string>();
+  /** Liste éventuelle fournie par le pack ; `null` = pas de manifeste. */
+  private manifest: Promise<Set<number> | null> | null = null;
+  /** Sondages infructueux consécutifs : au-delà, on considère qu'il n'y a pas de pack. */
+  private misses = 0;
+  private packOff = false;
+  private scene = new THREE.Scene();
+  private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, .01, 100);
+
+  constructor(private gl: THREE.WebGLRenderer) {
+    const hemi = new THREE.HemisphereLight(0xd8e8ff, 0x6a6250, .75);
+    const key = new THREE.DirectionalLight(0xfff6e0, 1.15);
+    key.position.set(4, 6, 8);
+    const fill = new THREE.DirectionalLight(0xbcd4f0, .35);
+    fill.position.set(-5, 2, -4);
+    this.scene.add(hemi, key, fill);
+  }
+
+  private key(sp: Species, facing: Facing, shiny: boolean) {
+    return `${sp.id}|${facing}|${shiny ? 's' : 'n'}`;
+  }
+
+  /** Rend le modèle hors écran et conserve la texture. Synchrone. */
+  private bake(sp: Species, facing: Facing, shiny: boolean): Baked {
+    const k = this.key(sp, facing, shiny);
+    const hit = this.cache.get(k);
+    if (hit) return hit;
+
+    const rig = buildCreature(sp, shiny);
+    this.scene.add(rig.group);
+
+    // Cadre carré autour de la créature, avec une marge constante.
+    const box = new THREE.Box3().setFromObject(rig.group);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+    const side = Math.max(size.x, size.y, size.z) * 1.16 || 1;
+    // Contour d'épaisseur constante à l'écran (~2,5 px sur 128), quelle que soit la taille.
+    addOutline(rig, side * .02);
+    // On cale le bas du cadre juste sous les pieds : le sprite pose sur la plateforme.
+    center.y = box.min.y + side / 2 - side * .05;
+
+    // Vue de trois-quarts : plus lisible qu'une face stricte sur des modèles simples.
+    // De dos, on prend plus de hauteur : sinon la tête disparaît derrière le corps.
+    const dir = facing === 'front'
+      ? new THREE.Vector3(.28, .26, 1).normalize()
+      : new THREE.Vector3(-.24, .55, -1).normalize();
+    this.cam.left = -side / 2; this.cam.right = side / 2;
+    this.cam.top = side / 2; this.cam.bottom = -side / 2;
+    this.cam.near = .01; this.cam.far = side * 6;
+    this.cam.position.copy(center).addScaledVector(dir, side * 2.2);
+    this.cam.lookAt(center);
+    this.cam.updateProjectionMatrix();
+
+    const target = new THREE.WebGLRenderTarget(SIZE, SIZE, {
+      minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+      format: THREE.RGBAFormat, samples: 0, depthBuffer: true,
+    });
+    target.texture.colorSpace = THREE.LinearSRGBColorSpace;
+    target.texture.generateMipmaps = false;
+    target.texture.userData.src = 'bake';
+
+    const prevTarget = this.gl.getRenderTarget();
+    const prevAlpha = this.gl.getClearAlpha();
+    const prevColor = new THREE.Color();
+    this.gl.getClearColor(prevColor);
+    this.gl.setRenderTarget(target);
+    this.gl.setClearColor(0x000000, 0);
+    this.gl.clear(true, true, false);
+    this.gl.render(this.scene, this.cam);
+    this.gl.setRenderTarget(prevTarget);
+    this.gl.setClearColor(prevColor, prevAlpha);
+
+    this.scene.remove(rig.group);
+
+    const baked: Baked = { tex: target.texture, target, side };
+    this.cache.set(k, baked);
+    this.order.push(k);
+    this.trim();
+    return baked;
+  }
+
+  private trim() {
+    while (this.order.length > CACHE_MAX) {
+      const old = this.order.shift()!;
+      const b = this.cache.get(old);
+      if (b?.target) b.target.dispose();
+      this.cache.delete(old);
+    }
+  }
+
+  /** Texture immédiate (cuisson) + côté du carré en unités monde. */
+  sprite(sp: Species, facing: Facing, shiny: boolean): { tex: THREE.Texture; side: number } {
+    const b = this.bake(sp, facing, shiny);
+    return { tex: b.tex, side: b.side };
+  }
+
+  /** Lit `sprites/index.json` une seule fois, s'il existe. */
+  private loadManifest(): Promise<Set<number> | null> {
+    this.manifest ??= (async () => {
+      try {
+        const res = await fetch('./sprites/index.json', { cache: 'force-cache' });
+        if (!res.ok) return null;
+        const raw: unknown = await res.json();
+        const list = Array.isArray(raw) ? raw : (raw as { dex?: number[] })?.dex;
+        return Array.isArray(list) ? new Set(list.map(Number)) : null;
+      } catch { return null; }
+    })();
+    return this.manifest;
+  }
+
+  /**
+   * Cherche une image fournie par le joueur. Résout `null` s'il n'y en a pas.
+   * `back/<dex>.png` est optionnel : on retombe sur la vue de face.
+   */
+  async pack(sp: Species, facing: Facing): Promise<THREE.Texture | null> {
+    if (sp.custom || this.packOff) return null;    // espèces maison : pas de pack attendu
+    const listed = await this.loadManifest();
+    if (listed && !listed.has(sp.dex)) return null;
+    for (const path of facing === 'back'
+      ? [`./sprites/back/${sp.dex}.png`, `./sprites/${sp.dex}.png`]
+      : [`./sprites/${sp.dex}.png`]) {
+      const hit = this.packHit.get(path);
+      if (hit) return hit;
+      if (this.packMiss.has(path)) continue;
+      try {
+        const res = await fetch(path, { cache: 'force-cache' });
+        // Un service worker peut répondre autre chose qu'une image : on vérifie le type.
+        if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
+          this.packMiss.add(path);
+          // Sans manifeste, trois échecs d'affilée signifient « aucun pack installé ».
+          if (!listed && ++this.misses >= 3) this.packOff = true;
+          continue;
+        }
+        const bmp = await createImageBitmap(await res.blob());
+        const tex = new THREE.Texture(bmp);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.magFilter = tex.minFilter = THREE.NearestFilter;
+        tex.generateMipmaps = false;
+        tex.needsUpdate = true;
+        tex.userData.src = 'pack';
+        this.packHit.set(path, tex);
+        this.misses = 0;
+        return tex;
+      } catch {
+        this.packMiss.add(path);
+        if (!listed && ++this.misses >= 3) this.packOff = true;
+      }
+    }
+    return null;
+  }
+
+  dispose() {
+    for (const b of this.cache.values()) b.target?.dispose();
+    for (const t of this.packHit.values()) t.dispose();
+    this.cache.clear();
+    this.order = [];
+  }
+}

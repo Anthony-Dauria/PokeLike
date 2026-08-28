@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { addOutline, animateRig, buildCreature, buildHuman, type CreatureRig } from '../creature/model';
+import { CreatureSprites, type Facing } from '../creature/sprites';
+import type { Species } from '../data/species';
 import { addLights, addSky, disposeObject, disposeScene, toonGradient, uTime, windify } from '../engine/renderer';
 import { spOf, type Mon } from '../game/mon';
 import { TYPE_COLOR } from '../data/types';
@@ -43,7 +45,42 @@ export class BattleScene {
   private fx: { obj: THREE.Object3D; life: number; max: number; vy: number; spin: number; grow?: number }[] = [];
   private shake = 0;
   private trainer: CreatureRig | null = null;
+  private sprites: CreatureSprites | null = null;
   shadows = true;
+  /** « sprites » = billboards cuits façon DS ; « 3d » = modèles affichés tels quels. */
+  mode: 'sprites' | '3d' = 'sprites';
+
+  constructor(gl?: THREE.WebGLRenderer) {
+    if (gl) this.sprites = new CreatureSprites(gl);
+  }
+
+  /**
+   * Construit le combattant : sprite plat (cuit depuis le modèle, ou image du pack
+   * déposé par le joueur) ou modèle 3D selon le réglage.
+   */
+  private makeCreature(sp: Species, shiny: boolean, facing: Facing): CreatureRig {
+    if (this.mode === '3d' || !this.sprites) {
+      const rig = buildCreature(sp, shiny);
+      addOutline(rig, .05);
+      return rig;
+    }
+    const { tex, side } = this.sprites.sprite(sp, facing, shiny);
+    const geo = new THREE.PlaneGeometry(side, side);
+    geo.translate(0, side / 2, 0);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, alphaTest: .5, side: THREE.DoubleSide, toneMapped: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    const group = new THREE.Group();
+    group.add(mesh);
+    // Si le joueur a fourni une image pour cette espèce, elle remplace la cuisson.
+    void this.sprites.pack(sp, facing).then((t) => {
+      if (!t || mat.map === t) return;
+      mat.map = t;
+      mat.needsUpdate = true;
+    });
+    return { group, bob: [mesh], limbs: [], height: side };
+  }
 
   private toon(c: number | string, o: THREE.MeshToonMaterialParameters = {}) {
     return new THREE.MeshToonMaterial({ color: c, gradientMap: toonGradient(), ...o });
@@ -196,9 +233,8 @@ export class BattleScene {
   setFoe(foe: Mon, isTrainer: boolean) {
     if (this.foeRig) { this.scene.remove(this.foeRig.group); disposeObject(this.foeRig.group); }
     const sp = spOf(foe);
-    this.foeRig = buildCreature(sp, foe.shiny);
+    this.foeRig = this.makeCreature(sp, foe.shiny, 'front');
     this.foeRig.group.scale.multiplyScalar(battleZoom(sp.scale));
-    addOutline(this.foeRig, .05);
     this.foeRig.group.position.copy(this.foePos);
     this.foeRig.group.position.y = .4;
     this.foeRig.group.rotation.y = -.35;
@@ -220,12 +256,11 @@ export class BattleScene {
   setMine(mine: Mon) {
     if (this.mineRig) { this.scene.remove(this.mineRig.group); disposeObject(this.mineRig.group); }
     const sp = spOf(mine);
-    this.mineRig = buildCreature(sp, mine.shiny);
+    this.mineRig = this.makeCreature(sp, mine.shiny, 'back');
     this.mineRig.group.scale.multiplyScalar(battleZoom(sp.scale));
-    addOutline(this.mineRig, .05);
     this.mineRig.group.position.copy(this.minePos);
     this.mineRig.group.position.y = .4;
-    this.mineRig.group.rotation.y = Math.PI + .62;   // léger trois-quarts : on devine la tête
+    this.mineRig.group.rotation.y = this.mode === 'sprites' ? 0 : Math.PI + .62;
     this.scene.add(this.mineRig.group);
     if (!this.mineShadow) this.mineShadow = this.contactShadow();
     this.mineShadow.scale.setScalar(.8 * sp.scale * battleZoom(sp.scale));
@@ -421,6 +456,14 @@ export class BattleScene {
       cam.position.set(sx, 5.6 + sy, 9.0);
       cam.lookAt(0.2, 1.6, -1.8);
     }
+  }
+
+  /** D'où vient la texture affichée : pack du joueur ou cuisson du modèle. */
+  spriteSource(who: 'mine' | 'foe'): string {
+    const rig = who === 'mine' ? this.mineRig : this.foeRig;
+    const mesh = rig?.group.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
+    const mat = mesh?.material as THREE.MeshBasicMaterial | undefined;
+    return (mat?.map?.userData.src as string) ?? '3d';
   }
 
   hideFoe() { if (this.foeRig) this.foeRig.group.visible = false; }

@@ -51,7 +51,7 @@ function rivalTeam(lv: number, extras: string[]): [string, number][] {
 class Game {
   renderer = new Renderer($('#scene') as HTMLCanvasElement);
   input = new Input();
-  battleScene = new BattleScene();
+  battleScene = new BattleScene(this.renderer.gl);
   battleUI = new BattleUI(this.battleScene);
   overworld: Overworld;
   map!: GameMap;
@@ -110,6 +110,7 @@ class Game {
     this.renderer.setStyle(state.style);
     this.overworld.shadows = state.quality === 'haut';
     this.battleScene.shadows = state.quality === 'haut';
+    this.battleScene.mode = state.creatures;
     if (this.overworld.loaded) {
       this.overworld.load(this.map, [this.overworld.px, this.overworld.py], this.overworld.facing, this.hiddenSet(), this.beatenSet());
     }
@@ -537,6 +538,7 @@ class Game {
   debugGoto(id: string) { void this.goto(id); }
   debugGym(id: string) { void this.gymBattle(id); }
   debugGive(sp: string, lv: number) { state.addMon(createMon(sp, lv, { metAt: 'Test' })); }
+  debugGiveLead(sp: string, lv: number) { state.party.unshift(createMon(sp, lv, { metAt: 'Test' })); state.party.length = Math.min(state.party.length, 6); }
   debugBadges(): string[] { return state.badges; }
   debugGiveBadge(id: string) { state.giveBadge(id); }
   debugSave() { saveGame(); }
@@ -580,6 +582,8 @@ class Game {
   debugSeeAll() { for (const s of DEX) { state.seen.add(s.id); if (s.dex % 3 === 0) state.caught.add(s.id); } }
   debugQuality(q: 'haut' | 'leger') { state.quality = q; this.applyQuality(); }
   debugStyle(st: 'ds' | 'lisse') { state.style = st; this.applyQuality(); }
+  debugCreatures(m: 'sprites' | '3d') { state.creatures = m; this.applyQuality(); }
+  debugSpriteSource() { return { foe: this.battleScene.spriteSource('foe'), mine: this.battleScene.spriteSource('mine') }; }
   debugShadows() { return this.renderer.gl.shadowMap.enabled; }
   debugPerf() {
     const i = this.renderer.gl.info;

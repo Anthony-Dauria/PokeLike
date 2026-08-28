@@ -24,7 +24,7 @@ const browser = await chromium.launch({ ...(process.env.CHROMIUM_PATH ? { execut
 const page = await browser.newPage({ viewport: { width: 412, height: 890 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
 const errors = [];
 page.on('pageerror', (e) => { errors.push('PAGEERROR: ' + e.message); console.log('PAGEERROR', e.message, e.stack); });
-page.on('console', (m) => { if (m.type() === 'error') { errors.push('CONSOLE: ' + m.text()); console.log('CONSOLE', m.text()); } });
+page.on('console', (m) => { if (m.type() === 'error' && !/sprites\//.test(m.text() + m.location().url)) { errors.push('CONSOLE: ' + m.text()); console.log('CONSOLE', m.text()); } });
 await page.goto('http://localhost:4177/index.html', { waitUntil: 'networkidle' });
 await page.waitForTimeout(400);
 

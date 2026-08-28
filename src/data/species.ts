@@ -8,7 +8,9 @@ export type Shape =
 
 export type Feat =
   | 'wings' | 'horn' | 'tail' | 'ears' | 'fins' | 'spikes' | 'crest' | 'aura' | 'claws' | 'shell'
-  | 'bulb' | 'cheeks' | 'fangs' | 'flame' | 'mane' | 'tuft';
+  | 'bulb' | 'cheeks' | 'fangs' | 'flame' | 'mane' | 'tuft'
+  // Motifs : appliqués par-dessus la silhouette pour distinguer les espèces proches.
+  | 'bands' | 'dots' | 'mask' | 'rings';
 
 /** Forme brute produite par le générateur (src/data/pokedex.gen.ts). */
 export interface RawSpecies {

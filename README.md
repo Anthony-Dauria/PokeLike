@@ -100,6 +100,17 @@ Quatre **légendaires itinérants** (Ignivore, Abyssaltar, Sylvanor, Chronoss) n
 - **Progression** : 100 niveaux, XP cubique, natures (25), IV, apprentissage de capacités avec remplacement au choix, évolutions annulables, PC de stockage illimité.
 - **Confort mobile** : joystick tactile + boutons A/B, clavier pris en charge (flèches/ZQSD, Entrée, Échap, Maj pour courir), interface adaptée portrait **et** paysage, encoches respectées.
 
+### Les créatures à l'écran
+
+En combat, chaque créature est un **sprite plat** posé sur sa plateforme — la présentation des jeux DS. La texture vient de la première source disponible :
+
+1. **Votre pack** — `public/sprites/<numéro national>.png` (et `back/<n>.png` pour la vue de dos). Rien n'est livré ni téléchargé : le dossier est vide et ignoré par git, vous y déposez ce que vous voulez. Un `index.json` optionnel évite les requêtes inutiles. Voir `public/sprites/LISEZMOI.md`.
+2. **Cuisson du modèle 3D** — sinon, le modèle procédural est rendu une fois hors écran en 128×128, contour compris, et la texture est réutilisée (cache de 64, vue de face et vue de dos). C'est ce que vous voyez par défaut.
+
+Le réglage **Créatures : Sprites / Modèles 3D** (Options) bascule entre les billboards et les modèles animés en volume.
+
+> Les sprites des jeux appartiennent à Nintendo / Game Freak / Creatures. Ce dépôt n'en distribue ni n'en télécharge aucun — il se contente de laisser la place.
+
 ### Rendu « console portable »
 
 Le jeu vise le rendu des Pokémon sur DS : basse définition, couleurs franches, contours nets — sans aucune texture ni asset.
@@ -113,7 +124,9 @@ Par-dessous, le moteur reste du cel-shading :
 
 - **Ombrage toon** (`MeshToonMaterial` + rampe de dégradé) sur tout ce qui est affiché, avec un ciel en dôme dégradé et un brouillard calé sur la couleur d'horizon.
 - **Ombres portées** temps réel : le soleil suit le joueur pour garder une carte d'ombre nette autour de lui.
-- **Contour façon dessin animé** sur les créatures en combat — coque inversée décalée *en espace vue*, donc d'épaisseur constante quelle que soit la taille des pièces du modèle.
+- **Contour façon dessin animé** sur les créatures — coque inversée décalée *en espace vue*, donc d'épaisseur constante quelle que soit la taille des pièces du modèle.
+- **Silhouette dérivée des statistiques** : les gros PV s'épaississent, la Vitesse affine et allonge. Appliqué automatiquement aux 217 espèces.
+- **Motifs** (bandes, taches, masque, anneaux) posés par-dessus la silhouette pour distinguer les espèces proches.
 - **Terrain vallonné** : champ de hauteur bruité partagé aux coins des tuiles (donc sans fissure), aplati sous les chemins et les bâtiments, avec occlusion douce près des obstacles.
 - **Couleurs fondues par famille de surface** : les nuances d'herbe se mélangent entre voisines, tandis que chemins, hautes herbes et rives gardent un bord net — les zones de rencontre restent lisibles d'un coup d'œil.
 - **Végétation animée par le vent** (shader de déplacement instancié), **eau** avec houle, hauts-fonds dégradés et lit sombre, **nuages** dérivants et **chaîne de montagnes** à l'horizon.
@@ -140,7 +153,7 @@ Aucun sprite ni aucune illustration Pokémon n'est copié dans le dépôt : les 
 | Annuler | **B** | Échap |
 | Menu | **☰** | Tab / M |
 
-Le menu **Options** règle le son et le niveau de détail graphique.
+Le menu **Options** règle le son, les créatures (sprites ou 3D), le rendu (écran DS ou lisse) et le niveau de détail graphique.
 
 ---
 
@@ -152,7 +165,7 @@ src/
                pokedex.gen.ts est généré — voir scripts/gen-pokedex.mjs
   engine/      rendu Three.js, entrées tactiles, audio chiptune, RNG déterministe
   world/       génération procédurale des cartes + scène 3D d'exploration
-  creature/    construction procédurale des modèles 3D
+  creature/    construction procédurale des modèles 3D + cuisson en sprites et pack joueur
   battle/      moteur de combat + scène 3D de combat
   game/        état de la partie, sauvegarde, modèle d'une créature
   ui/          dialogues, menus, sac, Dex, boutique, interface de combat
@@ -162,11 +175,14 @@ scripts/       génération du Pokédex et des icônes PWA + tests de bout en bo
 Tests de bout en bout, dans un vrai navigateur (Playwright) :
 
 ```bash
-npm test                # build + les trois suites
+npm test                # build + les quatre suites
 npm run test:smoke      # écran-titre → nouvelle partie → exploration
 npm run test:battle     # combat sauvage complet
 npm run test:flow       # cohérence du Pokédex, 114 cartes, arène, boutique, soins, badges, sauvegarde
+npm run test:sprites    # cuisson des modèles ET chargement d'un pack (pack factice généré à la volée)
 ```
+
+`npm run sprites:demo` fabrique un petit pack de démonstration (silhouettes colorées générées par le script, aucune image Pokémon) pour voir le mécanisme à l'œuvre.
 
 Les captures d'écran atterrissent dans `screenshots/`. Sur une machine où Chromium
 est déjà installé ailleurs, pointer `CHROMIUM_PATH` dessus.

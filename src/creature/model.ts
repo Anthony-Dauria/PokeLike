@@ -106,6 +106,11 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
   const limbs: THREE.Object3D[] = [];
   const f = new Set(sp.feats);
   let height = 1;
+  // La silhouette suit les statistiques : les gros PV s'épaississent,
+  // la Vitesse affine et allonge. Gratuit, et ça varie sur les 217 espèces.
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const bulk = clamp((sp.base.hp - 62) / 130, -.3, .42);
+  const agility = clamp((sp.base.spe - 70) / 130, -.3, .38);
   // Points d'ancrage renseignés par chaque silhouette, utilisés par les attributs.
   let head: [number, number, number] = [0, .9, .2];
   let headR = .28;
@@ -146,22 +151,22 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
       break;
     }
     case 'biped': {
-      const torso = part(CAPSULE, body, [0, .74, 0], [.33, .22, .3]);
+      const torso = part(CAPSULE, body, [0, .82, 0], [.28, .25, .26]);
       g.add(torso); bob.push(torso);
-      g.add(part(SPHERE, belly, [0, .68, .17], [.25, .3, .19]));
-      const h = part(SPHERE, body, [0, 1.2, .03], [.3, .3, .3]);
+      g.add(part(SPHERE, belly, [0, .76, .15], [.2, .3, .16]));
+      const h = part(SPHERE, body, [0, 1.28, .03], [.27, .27, .27]);
       g.add(h); bob.push(h);
-      g.add(part(SPHERE, belly, [0, 1.13, .24], [.16, .12, .13]));
-      addEyes(1.26, .26, .08, .14);
-      addBrows(1.37, .24, .14, .34);
+      g.add(part(SPHERE, belly, [0, 1.21, .22], [.14, .11, .12]));
+      addEyes(1.34, .24, .078, .13);
+      addBrows(1.45, .22, .13, .34);
       for (const s of [-1, 1]) {
-        const arm = part(CAPSULE, body, [s * .38, .8, 0], [.075, .13, .075], [0, 0, s * .28]);
+        const arm = part(CAPSULE, body, [s * .33, .86, 0], [.068, .16, .068], [0, 0, s * .24]);
         g.add(arm); limbs.push(arm);
-        g.add(part(SPHERE_LO, dark, [s * .45, .58, .02], [.1, .1, .1]));
+        g.add(part(SPHERE_LO, dark, [s * .39, .6, .02], [.09, .09, .09]));
       }
-      legPair(.17, .28, 0, .095, .18);
-      head = [0, 1.2, .03]; headR = .3; tail = [0, .6, -.4];
-      height = 1.55;
+      legPair(.15, .3, 0, .088, .22);
+      head = [0, 1.28, .03]; headR = .27; tail = [0, .62, -.36];
+      height = 1.65;
       break;
     }
     case 'humanoid': {
@@ -368,14 +373,16 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
 
   /* ---- attributs ---- */
   if (f.has('wings')) {
-    const wingMat = mat(shade(accentHex, .14), { transparent: true, opacity: .96, side: THREE.DoubleSide });
+    const wingMat = mat(shade(accentHex, -.24), { side: THREE.DoubleSide });
+    const boneMat = mat(shade(accentHex, .12));
     for (const s of [-1, 1]) {
       const wing = new THREE.Group();
-      wing.add(part(CONE, wingMat, [0, 0, 0], [.34, .5, .05], [Math.PI / 2, 0, 0]));
-      wing.add(part(CONE, wingMat, [s * .12, -.1, -.12], [.2, .34, .04], [Math.PI / 2, 0, s * .5]));
-      wing.position.set(s * .5, height * .62, -.12);
-      wing.rotation.z = s * -.85;
-      wing.rotation.y = s * .3;
+      wing.add(part(CONE, wingMat, [0, 0, 0], [.36, .55, .05], [Math.PI / 2, 0, 0]));
+      wing.add(part(CONE, wingMat, [s * .16, -.14, -.16], [.26, .42, .04], [Math.PI / 2, 0, s * .5]));
+      wing.add(part(CYL, boneMat, [0, .05, -.02], [.028, .34, .028], [Math.PI / 2, 0, s * .18]));
+      wing.position.set(s * .33, height * .74, -.2);
+      wing.rotation.z = s * -.55;
+      wing.rotation.y = s * .95;
       wing.traverse((o) => { (o as THREE.Mesh).castShadow = true; });
       g.add(wing); limbs.push(wing);
     }
@@ -420,11 +427,16 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
         [Math.cos(a) * .8, -a, Math.sin(a) * .8]));
     }
   }
+  // Décalée sur le côté, la queue reste visible de face — comme sur les sprites d'origine.
+  const tailSide = .18;
   if (f.has('flame')) {
-    const anchor: [number, number, number] = f.has('tail') ? [tail[0], tail[1] + .1, tail[2] - .12] : [0, height * .92, -.2];
+    const anchor: [number, number, number] = f.has('tail')
+      ? [tail[0] + tailSide * 1.5, tail[1] + .34, tail[2] - .3]
+      : [0, height * .95, -.18];
     const flame = new THREE.Group();
-    flame.add(part(CONE, new THREE.MeshBasicMaterial({ color: 0xff8a3a }), [0, 0, 0], [.15, .3, .15]));
-    flame.add(part(CONE, new THREE.MeshBasicMaterial({ color: 0xffd75a }), [0, -.04, 0], [.09, .2, .09]));
+    flame.add(part(CONE, new THREE.MeshBasicMaterial({ color: 0xff7a2a }), [0, 0, 0], [.19, .38, .19]));
+    flame.add(part(CONE, new THREE.MeshBasicMaterial({ color: 0xffc94a }), [0, -.05, 0], [.12, .26, .12]));
+    flame.add(part(CONE, new THREE.MeshBasicMaterial({ color: 0xfff2b0 }), [0, -.1, 0], [.06, .14, .06]));
     flame.position.set(...anchor);
     g.add(flame); limbs.push(flame);
   }
@@ -432,7 +444,8 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
     const t = new THREE.Group();
     t.add(part(CAPSULE, body, [0, 0, 0], [.075, .16, .075], [1.15, 0, 0]));
     t.add(part(CONE, accent, [0, .16, -.32], [.11, .26, .11], [-1.15, 0, 0]));
-    t.position.set(tail[0], tail[1], tail[2]);
+    t.position.set(tail[0] + tailSide, tail[1], tail[2]);
+    t.rotation.y = -.35;
     t.traverse((o) => { (o as THREE.Mesh).castShadow = true; });
     g.add(t); limbs.push(t);
   }
@@ -467,6 +480,38 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
     aura.castShadow = false;
     g.add(aura); limbs.push(aura);
   }
+  /* ---- motifs ---- */
+  const torsoY = height * .46;
+  const torsoR = .4;
+  if (f.has('bands')) {
+    const m = mat(shade(accentHex, -.05));
+    for (let i = 0; i < 3; i++)
+      g.add(part(BOX, m, [0, torsoY + (i - 1) * .17, -.06], [torsoR * 1.62, .07, torsoR * 1.5]));
+  }
+  if (f.has('dots')) {
+    const m = mat(shade(accentHex, -.02));
+    for (let i = 0; i < 7; i++) {
+      const a = rng.next() * Math.PI * 2;
+      const u = rng.next() * 2 - 1;
+      const r = torsoR * 1.02;
+      g.add(part(SPHERE_LO, m,
+        [Math.cos(a) * r * Math.sqrt(1 - u * u), torsoY + u * torsoR * .8, Math.sin(a) * r * Math.sqrt(1 - u * u)],
+        [.07, .045, .07]));
+    }
+  }
+  if (f.has('mask')) {
+    g.add(part(BOX, mat(shade(accentHex, -.12)),
+      [head[0], head[1] + headR * .12, head[2] + headR * .58], [headR * 1.5, headR * .5, headR * .5]));
+  }
+  if (f.has('rings')) {
+    const m = mat(shade(accentHex, .16));
+    for (const s of [-1, 1]) {
+      g.add(part(TORUS, m, [s * .2, height * .22, 0], [.13, .13, .13], [Math.PI / 2, 0, 0]));
+      g.add(part(TORUS, m, [s * .38, torsoY, 0], [.11, .11, .11], [0, 0, Math.PI / 2]));
+    }
+    g.add(part(TORUS, m, [head[0], head[1] + headR * .55, head[2]], [.16, .16, .16], [Math.PI / 2, 0, 0]));
+  }
+
   if (sp.legend) {
     const halo = part(TORUS, new THREE.MeshBasicMaterial({ color: 0xffe6a0, transparent: true, opacity: .6 }),
       [0, height * 1.04, 0], [.44, .44, .44], [Math.PI / 2, 0, 0]);
@@ -481,9 +526,10 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
     }
   }
 
-  void rng;
-  g.scale.setScalar(sp.scale);
-  return { group: g, bob, limbs, height: height * sp.scale };
+  const wide = 1 + bulk * .3 - agility * .12;
+  const tall = 1 - bulk * .08 + agility * .16;
+  g.scale.set(sp.scale * wide, sp.scale * tall, sp.scale * wide);
+  return { group: g, bob, limbs, height: height * sp.scale * tall };
 }
 
 function shiftHueStr(hex: string, amt: number): string {

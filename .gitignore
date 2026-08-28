@@ -4,3 +4,7 @@ dev-dist/
 *.log
 .DS_Store
 screenshots/
+
+# Pack de sprites fourni par le joueur : jamais versionné (seul le mode d'emploi l'est).
+public/sprites/*
+!public/sprites/LISEZMOI.md
