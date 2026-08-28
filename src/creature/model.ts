@@ -88,13 +88,14 @@ export function addOutline(rig: CreatureRig, thickness = 0.05, color = 0x141824)
 /* ---------------- créatures ---------------- */
 export function buildCreature(sp: Species, shiny = false): CreatureRig {
   const rng = new RNG(hashStr(sp.id));
-  const base = TYPE_COLOR[sp.types[0]];
-  const accentHex = TYPE_COLOR[sp.types[1] ?? sp.types[0]];
+  // Couleurs propres à l'espèce quand elles existent, sinon dérivées du type.
+  const baseHex = sp.body ?? TYPE_COLOR[sp.types[0]];
+  const accentHex = sp.accent ?? TYPE_COLOR[sp.types[1] ?? sp.types[0]];
   const hueShift = shiny ? .5 : 0;
-  const bodyHex = shiftHueStr(base, hueShift + rng.next() * .04 - .02);
+  const bodyHex = shiftHueStr(baseHex, hueShift);
   const body = mat(bodyHex);
-  const belly = mat(shade(bodyHex, .26));
-  const accent = mat(shiftHue(accentHex, hueShift + .04));
+  const belly = mat(shade(bodyHex, .22));
+  const accent = mat(shiftHue(accentHex, hueShift));
   const dark = mat(shade(bodyHex, -.2));
   const eyeW = mat(0xf8fcff);
   const eyeB = mat(0x0d121c);
@@ -105,6 +106,10 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
   const limbs: THREE.Object3D[] = [];
   const f = new Set(sp.feats);
   let height = 1;
+  // Points d'ancrage renseignés par chaque silhouette, utilisés par les attributs.
+  let head: [number, number, number] = [0, .9, .2];
+  let headR = .28;
+  let tail: [number, number, number] = [0, .4, -.5];
 
   const addEyes = (y: number, z: number, r = .11, spread = .17) => {
     for (const s of [-1, 1]) {
@@ -116,24 +121,27 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
   const addBrows = (y: number, z: number, spread: number, tilt: number) => {
     for (const s of [-1, 1]) g.add(part(BOX, dark, [s * spread, y, z], [.1, .028, .05], [0, 0, s * tilt]));
   };
+  const legPair = (sx: number, y: number, z: number, r: number, len: number, m = dark) => {
+    for (const s of [-1, 1]) {
+      const leg = part(CAPSULE, m, [s * sx, y, z], [r, len, r]);
+      g.add(leg); limbs.push(leg);
+      g.add(part(SPHERE_LO, m, [s * sx, y - len - r * .6, z + .05], [r * 1.4, r * .8, r * 1.7]));
+    }
+  };
 
   switch (sp.shape) {
     case 'quad': {
       const torso = part(SPHERE, body, [0, .54, 0], [.43, .35, .56]);
       g.add(torso); bob.push(torso);
       g.add(part(SPHERE, belly, [0, .40, .06], [.35, .23, .47]));
-      const head = part(SPHERE, body, [0, .78, .46], [.32, .3, .3]);
-      g.add(head); bob.push(head);
-      g.add(part(SPHERE, belly, [0, .70, .64], [.19, .15, .17]));      // museau
-      g.add(part(CONE, accent, [0, .70, .76], [.1, .16, .1], [Math.PI / 2, 0, 0]));
-      g.add(part(SPHERE_LO, eyeB, [0, .74, .74], [.05, .04, .05]));    // truffe
+      const h = part(SPHERE, body, [0, .78, .46], [.32, .3, .3]);
+      g.add(h); bob.push(h);
+      g.add(part(SPHERE, belly, [0, .70, .64], [.19, .15, .17]));
+      g.add(part(SPHERE_LO, eyeB, [0, .74, .74], [.05, .04, .05]));
       addEyes(.85, .68, .075, .15);
       addBrows(.94, .66, .15, .3);
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-        const leg = part(CAPSULE, dark, [sx * .28, .2, sz * .33], [.085, .13, .085]);
-        g.add(leg); limbs.push(leg);
-        g.add(part(SPHERE_LO, dark, [sx * .28, .06, sz * .33 + .04], [.11, .07, .13]));
-      }
+      for (const sz of [-1, 1]) legPair(.28, .2, sz * .33, .085, .13);
+      head = [0, .78, .46]; headR = .3; tail = [0, .48, -.56];
       height = 1.1;
       break;
     }
@@ -141,21 +149,59 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
       const torso = part(CAPSULE, body, [0, .74, 0], [.33, .22, .3]);
       g.add(torso); bob.push(torso);
       g.add(part(SPHERE, belly, [0, .68, .17], [.25, .3, .19]));
-      const head = part(SPHERE, body, [0, 1.2, .03], [.3, .3, .3]);
-      g.add(head); bob.push(head);
+      const h = part(SPHERE, body, [0, 1.2, .03], [.3, .3, .3]);
+      g.add(h); bob.push(h);
       g.add(part(SPHERE, belly, [0, 1.13, .24], [.16, .12, .13]));
       addEyes(1.26, .26, .08, .14);
       addBrows(1.37, .24, .14, .34);
-      g.add(part(CONE, accent, [0, 1.14, .32], [.07, .13, .07], [Math.PI / 2, 0, 0]));
       for (const s of [-1, 1]) {
         const arm = part(CAPSULE, body, [s * .38, .8, 0], [.075, .13, .075], [0, 0, s * .28]);
         g.add(arm); limbs.push(arm);
         g.add(part(SPHERE_LO, dark, [s * .45, .58, .02], [.1, .1, .1]));
-        const leg = part(CAPSULE, dark, [s * .17, .28, 0], [.095, .18, .095]);
-        g.add(leg); limbs.push(leg);
-        g.add(part(SPHERE_LO, dark, [s * .17, .07, .06], [.12, .07, .16]));
       }
+      legPair(.17, .28, 0, .095, .18);
+      head = [0, 1.2, .03]; headR = .3; tail = [0, .6, -.4];
       height = 1.55;
+      break;
+    }
+    case 'humanoid': {
+      const torso = part(CAPSULE, body, [0, .88, 0], [.26, .3, .22]);
+      g.add(torso); bob.push(torso);
+      g.add(part(SPHERE, belly, [0, .8, .16], [.19, .26, .14]));
+      g.add(part(BOX, dark, [0, .58, 0], [.42, .09, .32]));
+      const h = part(SPHERE, body, [0, 1.42, .02], [.26, .28, .26]);
+      g.add(h); bob.push(h);
+      addEyes(1.47, .23, .075, .13);
+      addBrows(1.58, .21, .13, .3);
+      for (const s of [-1, 1]) {
+        const arm = part(CAPSULE, body, [s * .34, .88, 0], [.062, .2, .062], [0, 0, s * .1]);
+        g.add(arm); limbs.push(arm);
+        g.add(part(SPHERE_LO, accent, [s * .36, .58, .02], [.085, .095, .085]));
+      }
+      legPair(.15, .32, 0, .085, .22);
+      head = [0, 1.42, .02]; headR = .27; tail = [0, .7, -.34];
+      height = 1.8;
+      break;
+    }
+    case 'dragon': {
+      const torso = part(SPHERE, body, [0, .95, -.05], [.42, .46, .5]);
+      g.add(torso); bob.push(torso);
+      g.add(part(SPHERE, belly, [0, .84, .22], [.3, .36, .3]));
+      // cou puis tête projetée en avant
+      for (let i = 0; i < 3; i++)
+        g.add(part(SPHERE, body, [0, 1.3 + i * .16, .1 + i * .12], [.19 - i * .015, .18, .19 - i * .015]));
+      const h = part(SPHERE, body, [0, 1.78, .5], [.26, .24, .34]);
+      g.add(h); bob.push(h);
+      g.add(part(SPHERE, belly, [0, 1.72, .74], [.15, .11, .18]));
+      addEyes(1.86, .68, .075, .14);
+      addBrows(1.96, .64, .14, .35);
+      for (const s of [-1, 1]) {
+        const arm = part(CAPSULE, body, [s * .42, .9, .1], [.07, .12, .07], [0, 0, s * .4]);
+        g.add(arm); limbs.push(arm);
+      }
+      legPair(.24, .38, 0, .11, .22);
+      head = [0, 1.78, .5]; headR = .3; tail = [0, .8, -.62];
+      height = 2.15;
       break;
     }
     case 'serpent': {
@@ -165,12 +211,12 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
         g.add(seg); if (i < 3) bob.push(seg);
         y += .13; z -= .12; r *= .92;
       }
-      const head = part(SPHERE, body, [0, y + .05, z + .07], [.29, .26, .32]);
-      g.add(head); bob.push(head);
+      const h = part(SPHERE, body, [0, y + .05, z + .07], [.29, .26, .32]);
+      g.add(h); bob.push(h);
       g.add(part(SPHERE, belly, [0, y - .01, z + .3], [.17, .12, .16]));
       addEyes(y + .12, z + .3, .075, .14);
       addBrows(y + .22, z + .28, .14, .35);
-      g.add(part(CONE, accent, [0, y, z + .38], [.09, .16, .09], [Math.PI / 2, 0, 0]));
+      head = [0, y + .05, z + .07]; headR = .3; tail = [0, .34, z - 1.0];
       height = y + .32;
       break;
     }
@@ -178,20 +224,32 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
       const torso = part(SPHERE, body, [0, .72, 0], [.33, .4, .35]);
       g.add(torso); bob.push(torso);
       g.add(part(SPHERE, belly, [0, .64, .19], [.25, .29, .22]));
-      const head = part(SPHERE, body, [0, 1.14, .05], [.26, .25, .26]);
-      g.add(head); bob.push(head);
+      const h = part(SPHERE, body, [0, 1.14, .05], [.26, .25, .26]);
+      g.add(h); bob.push(h);
       addEyes(1.19, .25, .075, .13);
-      g.add(part(CONE, mat(0xf7c948), [0, 1.09, .32], [.085, .2, .085], [Math.PI / 2, 0, 0]));
+      g.add(part(CONE, mat(shade(accentHex, .1)), [0, 1.09, .32], [.085, .2, .085], [Math.PI / 2, 0, 0]));
       for (const s of [-1, 1]) {
         const leg = part(CYL, mat(0xdca548), [s * .13, .21, 0], [.045, .42, .045]);
         g.add(leg); limbs.push(leg);
         for (let t = -1; t <= 1; t++)
           g.add(part(BOX, mat(0xdca548), [s * .13 + t * .05, .015, .07], [.03, .03, .13]));
       }
-      // plumage de queue
       for (let i = -1; i <= 1; i++)
         g.add(part(CONE, accent, [i * .1, .68, -.36], [.07, .3, .04], [1.35, 0, i * .35]));
+      head = [0, 1.14, .05]; headR = .26; tail = [0, .68, -.42];
       height = 1.45;
+      break;
+    }
+    case 'bat': {
+      const torso = part(SPHERE, body, [0, .95, 0], [.3, .3, .28]);
+      g.add(torso); bob.push(torso);
+      g.add(part(SPHERE, belly, [0, .88, .18], [.2, .18, .14]));
+      addEyes(1.0, .22, .08, .13);
+      // grandes oreilles caractéristiques
+      for (const s of [-1, 1])
+        g.add(part(CONE, body, [s * .17, 1.24, -.02], [.11, .3, .09], [0, 0, s * .35]));
+      head = [0, .95, 0]; headR = .3; tail = [0, .75, -.3];
+      height = 1.35;
       break;
     }
     case 'blob': {
@@ -201,6 +259,7 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
       addEyes(.58, .43, .095, .18);
       addBrows(.72, .4, .18, .28);
       g.add(part(SPHERE_LO, dark, [0, .42, .5], [.07, .035, .04]));
+      head = [0, .5, .2]; headR = .4; tail = [0, .3, -.5];
       height = 1;
       break;
     }
@@ -208,8 +267,8 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
       const th = part(SPHERE, body, [0, .52, -.12], [.29, .27, .35]);
       g.add(th); bob.push(th);
       g.add(part(SPHERE, dark, [0, .5, .28], [.25, .23, .25]));
-      const head = part(SPHERE, body, [0, .56, .56], [.21, .21, .21]);
-      g.add(head); bob.push(head);
+      const h = part(SPHERE, body, [0, .56, .56], [.21, .21, .21]);
+      g.add(h); bob.push(h);
       addEyes(.6, .72, .085, .12);
       for (const s of [-1, 1]) for (let i = 0; i < 3; i++) {
         const leg = part(CAPSULE, dark, [s * .31, .26, -.22 + i * .29], [.03, .1, .03], [0, 0, s * .55]);
@@ -219,6 +278,7 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
         g.add(part(CYL, accent, [s * .1, .76, .62], [.018, .22, .018], [-.6, 0, s * .5]));
         g.add(part(SPHERE_LO, accent, [s * .21, .95, .74], [.045, .045, .045]));
       }
+      head = [0, .56, .56]; headR = .22; tail = [0, .5, -.44];
       height = 1.05;
       break;
     }
@@ -229,9 +289,20 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
       addEyes(.7, .39, .085, .17);
       g.add(part(CONE, accent, [0, .56, -.62], [.28, .36, .09], [Math.PI / 2, 0, 0]));
       g.add(part(CONE, accent, [0, .95, -.04], [.15, .27, .05]));
-      for (const s of [-1, 1])
-        g.add(part(CONE, accent, [s * .3, .5, .06], [.15, .22, .04], [0, 0, s * 1.35]));
       g.add(part(SPHERE_LO, dark, [0, .5, .5], [.07, .04, .04]));
+      head = [0, .66, .3]; headR = .3; tail = [0, .56, -.62];
+      height = 1.1;
+      break;
+    }
+    case 'turtle': {
+      const shell = part(SPHERE, mat(shade(accentHex, -.06)), [0, .58, -.05], [.62, .42, .6]);
+      g.add(shell); bob.push(shell);
+      g.add(part(SPHERE, belly, [0, .34, 0], [.55, .2, .54]));
+      const h = part(SPHERE, body, [0, .68, .6], [.24, .23, .26]);
+      g.add(h); bob.push(h);
+      addEyes(.74, .8, .07, .12);
+      for (const sz of [-1, 1]) legPair(.42, .18, sz * .3, .1, .07, body);
+      head = [0, .68, .6]; headR = .25; tail = [0, .4, -.6];
       height = 1.1;
       break;
     }
@@ -239,9 +310,8 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
       const bodyT = mat(bodyHex, { transparent: true, opacity: .94 });
       const torso = part(SPHERE, bodyT, [0, .82, 0], [.38, .42, .36]);
       g.add(torso); bob.push(torso);
-      const tail = part(CONE, mat(bodyHex, { transparent: true, opacity: .72 }), [0, .3, 0], [.36, .54, .34], [Math.PI, 0, 0]);
-      g.add(tail); bob.push(tail);
-      // franges spectrales
+      const tailG = part(CONE, mat(bodyHex, { transparent: true, opacity: .72 }), [0, .3, 0], [.36, .54, .34], [Math.PI, 0, 0]);
+      g.add(tailG); bob.push(tailG);
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2;
         const w = part(CONE, mat(bodyHex, { transparent: true, opacity: .55 }),
@@ -254,6 +324,7 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
         const arm = part(SPHERE, bodyT, [s * .46, .86, .04], [.11, .11, .11]);
         g.add(arm); limbs.push(arm);
       }
+      head = [0, .86, .1]; headR = .38; tail = [0, .4, -.4];
       height = 1.35;
       break;
     }
@@ -261,8 +332,8 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
       const torso = part(BOX, body, [0, .66, 0], [.64, .58, .52]);
       g.add(torso); bob.push(torso);
       g.add(part(BOX, belly, [0, .58, .28], [.4, .32, .04]));
-      const head = part(BOX, dark, [0, 1.1, .02], [.38, .32, .36]);
-      g.add(head); bob.push(head);
+      const h = part(BOX, dark, [0, 1.1, .02], [.38, .32, .36]);
+      g.add(h); bob.push(h);
       addEyes(1.12, .21, .07, .12);
       for (const s of [-1, 1]) {
         const arm = part(BOX, body, [s * .5, .64, 0], [.21, .42, .23]);
@@ -271,6 +342,7 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
         const leg = part(BOX, dark, [s * .23, .19, 0], [.23, .38, .27]);
         g.add(leg); limbs.push(leg);
       }
+      head = [0, 1.1, .02]; headR = .32; tail = [0, .6, -.4];
       height = 1.4;
       break;
     }
@@ -287,11 +359,8 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
         g.add(leaf); limbs.push(leaf);
       }
       g.add(part(CYL, mat(shade(TYPE_COLOR.Plante, -.18)), [0, .84, 0], [.05, .12, .05]));
-      for (const s of [-1, 1]) {
-        const leg = part(CAPSULE, dark, [s * .16, .18, 0], [.075, .09, .075]);
-        g.add(leg); limbs.push(leg);
-        g.add(part(SPHERE_LO, dark, [s * .16, .05, .05], [.1, .06, .13]));
-      }
+      legPair(.16, .18, 0, .075, .09);
+      head = [0, .58, .2]; headR = .35; tail = [0, .4, -.42];
       height = 1.4;
       break;
     }
@@ -312,23 +381,60 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
     }
   }
   if (f.has('horn')) {
-    g.add(part(CONE, mat(shade(accentHex, .3)), [0, height * .93, .05], [.065, .3, .065], [-.2, 0, 0]));
+    g.add(part(CONE, mat(shade(accentHex, .3)), [head[0], head[1] + headR * .95, head[2] - .02], [.065, .3, .065], [-.2, 0, 0]));
     for (const s of [-1, 1])
-      g.add(part(CONE, mat(shade(accentHex, .3)), [s * .17, height * .87, .01], [.045, .2, .045], [0, 0, s * .45]));
+      g.add(part(CONE, mat(shade(accentHex, .3)), [head[0] + s * headR * .6, head[1] + headR * .7, head[2] - .06], [.045, .2, .045], [0, 0, s * .45]));
   }
   if (f.has('ears')) {
     for (const s of [-1, 1]) {
-      g.add(part(CONE, body, [s * .18, height * .87, .03], [.09, .23, .07], [0, 0, s * .32]));
-      g.add(part(CONE, accent, [s * .18, height * .855, .05], [.055, .15, .04], [0, 0, s * .32]));
+      g.add(part(CONE, body, [head[0] + s * headR * .6, head[1] + headR * .85, head[2] - .04], [.09, .23, .07], [0, 0, s * .32]));
+      g.add(part(CONE, accent, [head[0] + s * headR * .6, head[1] + headR * .82, head[2] - .02], [.055, .15, .04], [0, 0, s * .32]));
     }
   }
+  if (f.has('tuft')) {
+    for (let i = 0; i < 3; i++)
+      g.add(part(CONE, accent, [head[0] + (i - 1) * .07, head[1] + headR * (1.05 + (i === 1 ? .12 : 0)), head[2] - .02],
+        [.035, .16, .035], [-.25, 0, (i - 1) * .5]));
+  }
+  if (f.has('cheeks')) {
+    for (const s of [-1, 1])
+      g.add(part(SPHERE, mat(shade(accentHex, .18)), [head[0] + s * headR * .78, head[1] - headR * .18, head[2] + headR * .5], [.085, .085, .05]));
+  }
+  if (f.has('fangs')) {
+    for (const s of [-1, 1])
+      g.add(part(CONE, mat(0xf6f8fc), [head[0] + s * .07, head[1] - headR * .42, head[2] + headR * .78], [.03, .09, .03], [Math.PI, 0, 0]));
+  }
+  if (f.has('mane')) {
+    const m = mat(shade(accentHex, .1));
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2;
+      g.add(part(CONE, m, [head[0] + Math.cos(a) * headR * .95, head[1] - headR * .55, head[2] - .06 + Math.sin(a) * headR * .8],
+        [.09, .22, .09], [Math.cos(a) * .9, -a, Math.sin(a) * .9]));
+    }
+  }
+  if (f.has('bulb')) {
+    g.add(part(SPHERE, mat(shade(accentHex, .05)), [0, height * .74, -.16], [.28, .26, .28]));
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + .4;
+      g.add(part(CONE, accent, [Math.cos(a) * .2, height * .84, -.16 + Math.sin(a) * .2], [.14, .3, .05],
+        [Math.cos(a) * .8, -a, Math.sin(a) * .8]));
+    }
+  }
+  if (f.has('flame')) {
+    const anchor: [number, number, number] = f.has('tail') ? [tail[0], tail[1] + .1, tail[2] - .12] : [0, height * .92, -.2];
+    const flame = new THREE.Group();
+    flame.add(part(CONE, new THREE.MeshBasicMaterial({ color: 0xff8a3a }), [0, 0, 0], [.15, .3, .15]));
+    flame.add(part(CONE, new THREE.MeshBasicMaterial({ color: 0xffd75a }), [0, -.04, 0], [.09, .2, .09]));
+    flame.position.set(...anchor);
+    g.add(flame); limbs.push(flame);
+  }
   if (f.has('tail')) {
-    const tail = new THREE.Group();
-    tail.add(part(CAPSULE, body, [0, 0, 0], [.075, .16, .075], [1.15, 0, 0]));
-    tail.add(part(CONE, accent, [0, .16, -.32], [.11, .26, .11], [-1.15, 0, 0]));
-    tail.position.set(0, height * .38, -.5);
-    tail.traverse((o) => { (o as THREE.Mesh).castShadow = true; });
-    g.add(tail); limbs.push(tail);
+    const t = new THREE.Group();
+    t.add(part(CAPSULE, body, [0, 0, 0], [.075, .16, .075], [1.15, 0, 0]));
+    t.add(part(CONE, accent, [0, .16, -.32], [.11, .26, .11], [-1.15, 0, 0]));
+    t.position.set(tail[0], tail[1], tail[2]);
+    t.traverse((o) => { (o as THREE.Mesh).castShadow = true; });
+    g.add(t); limbs.push(t);
   }
   if (f.has('fins')) {
     const finMat = mat(shade(accentHex, .12), { side: THREE.DoubleSide });
@@ -344,16 +450,16 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
   }
   if (f.has('crest')) {
     for (let i = 0; i < 4; i++)
-      g.add(part(CONE, accent, [0, height * (.86 + i * .035), -.02 - i * .1], [.065, .22 - i * .04, .035], [-.55, 0, 0]));
+      g.add(part(CONE, accent, [head[0], head[1] + headR * (.9 + i * .1), head[2] - .04 - i * .1], [.065, .24 - i * .04, .035], [-.55, 0, 0]));
   }
   if (f.has('claws')) {
     for (const s of [-1, 1]) for (let i = 0; i < 3; i++)
       g.add(part(CONE, mat(0xf4f6fa), [s * (.34 + i * .045), height * .22, .18 - i * .085], [.028, .1, .028], [-1.25, 0, 0]));
   }
   if (f.has('shell')) {
-    g.add(part(SPHERE, mat(shade(accentHex, -.14)), [0, height * .58, -.13], [.46, .36, .42]));
+    g.add(part(SPHERE, mat(shade(accentHex, -.14)), [0, height * .52, -.13], [.46, .36, .42]));
     for (let i = 0; i < 3; i++)
-      g.add(part(TORUS, mat(shade(accentHex, -.26)), [0, height * .58, -.13], [.3 + i * .07, .3 + i * .07, .3], [1.35, 0, 0]));
+      g.add(part(TORUS, mat(shade(accentHex, -.26)), [0, height * .52, -.13], [.3 + i * .07, .3 + i * .07, .3], [1.35, 0, 0]));
   }
   if (f.has('aura')) {
     const aura = part(TORUS, new THREE.MeshBasicMaterial({ color: shade(accentHex, .34), transparent: true, opacity: .45 }),
@@ -363,7 +469,7 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
   }
   if (sp.legend) {
     const halo = part(TORUS, new THREE.MeshBasicMaterial({ color: 0xffe6a0, transparent: true, opacity: .6 }),
-      [0, height * 1.08, 0], [.44, .44, .44], [Math.PI / 2, 0, 0]);
+      [0, height * 1.04, 0], [.44, .44, .44], [Math.PI / 2, 0, 0]);
     halo.castShadow = false;
     g.add(halo); limbs.push(halo);
     for (let i = 0; i < 6; i++) {
@@ -375,6 +481,7 @@ export function buildCreature(sp: Species, shiny = false): CreatureRig {
     }
   }
 
+  void rng;
   g.scale.setScalar(sp.scale);
   return { group: g, bob, limbs, height: height * sp.scale };
 }

@@ -2,7 +2,7 @@
 
 RPG de capture de créatures, **en 3D**, jouable au doigt et **installable sur mobile en un tap** (PWA — aucun store, aucun compte, fonctionne hors-ligne).
 
-> 3 starters exclusifs · 16 arènes · une Ligue · un post-game complet façon Or/Argent · 76 créatures · 103 capacités · les 18 types.
+> **217 espèces** — 208 vrais Pokémon des générations 1 à 9 + 3 lignes exclusives · 16 arènes · une Ligue · un post-game complet façon Or/Argent · 103 capacités · les 18 types.
 
 ---
 
@@ -37,6 +37,26 @@ Le build utilise des chemins relatifs (`base: './'`), donc n'importe quel héber
 ---
 
 ## Le jeu
+
+### Le Pokédex
+
+**208 Pokémon officiels** couvrant les **neuf générations**, dont les 27 lignes de starters (Bulbizarre à Coiffeton), les pseudo-légendaires (Dracolosse, Tyranocif, Drattak, Carchacrok, Trioxhydre, Tranchodon, Lancargot) et huit légendaires itinérants (Mewtwo, Lugia, Rayquaza, Darkrai, Zekrom, Xerneas, Zacian, Koraidon).
+
+Noms français, types, statistiques de base et chaînes d'évolution proviennent de sources ouvertes et sont **régénérés par script**, jamais recopiés à la main :
+
+```bash
+npm run pokedex   # @pkmn/dex + pokemon → src/data/pokedex.gen.ts
+```
+
+Les deux paquets sont des **dépendances de développement** : rien n'est téléchargé à l'exécution, et le jeu reste jouable hors-ligne. Les descripteurs visuels (silhouette, attributs, couleurs) qui pilotent les modèles 3D sont écrits à la main dans `scripts/roster-*.mjs`.
+
+> ⚠️ Les noms et les créatures Pokémon appartiennent à Nintendo / Game Freak / The Pokémon Company. Ce dépôt est un projet personnel non commercial : ne le publiez pas sous une forme qui laisserait croire à un produit officiel.
+
+Quelques choix de conception :
+
+- Les évolutions par pierre, échange ou bonheur sont converties en **évolutions par niveau** (le moteur ne gère que celles-là) : Pikachu passe Raichu au niveau 30, Kadabra devient Alakazam au 36, etc.
+- **Évoli** garde ses cinq voies : au niveau 30, le jeu demande quelle forme choisir.
+- Les lignes de starters officielles se trouvent **dans la nature**, groupées par thème : les Plante en Route 2, les Eau sur la plage de la Route 4, les Feu sur la route du volcan.
 
 ### Les 3 starters (lignes exclusives)
 
@@ -80,9 +100,16 @@ Quatre **légendaires itinérants** (Ignivore, Abyssaltar, Sylvanor, Chronoss) n
 - **Progression** : 100 niveaux, XP cubique, natures (25), IV, apprentissage de capacités avec remplacement au choix, évolutions annulables, PC de stockage illimité.
 - **Confort mobile** : joystick tactile + boutons A/B, clavier pris en charge (flèches/ZQSD, Entrée, Échap, Maj pour courir), interface adaptée portrait **et** paysage, encoches respectées.
 
-### Rendu 3D
+### Rendu « console portable »
 
-Le jeu vise un rendu **cel-shading** lisible sur petit écran, sans aucune texture ni asset :
+Le jeu vise le rendu des Pokémon sur DS : basse définition, couleurs franches, contours nets — sans aucune texture ni asset.
+
+- **Passe basse définition** : la 3D est rendue dans une cible de 232 px de côté court puis agrandie au plus proche voisin. C'est ce qui donne le grain « pixel » de la console.
+- **Quantification 15 bits** (32 niveaux par canal), la profondeur couleur réelle de la DS.
+- **Interface façon boîtes de dialogue Pokémon** : panneaux clairs, bordures épaisses, double liseré, barres de PV vertes/jaunes/rouges.
+- Réglage **Rendu : Écran DS / Lisse** dans les Options pour repasser en pleine définition.
+
+Par-dessous, le moteur reste du cel-shading :
 
 - **Ombrage toon** (`MeshToonMaterial` + rampe de dégradé) sur tout ce qui est affiché, avec un ciel en dôme dégradé et un brouillard calé sur la couleur d'horizon.
 - **Ombres portées** temps réel : le soleil suit le joueur pour garder une carte d'ombre nette autour de lui.
@@ -93,11 +120,13 @@ Le jeu vise un rendu **cel-shading** lisible sur petit écran, sans aucune textu
 - Onze palettes de biome (plaine, forêt, montagne, plage, désert, neige, sommet, volcan, marais, grotte, intérieur) : chaque région a sa lumière, ses props et son ciel.
 - Combats : arène en deux plateformes, décor de fond sur deux profondeurs, poussières en suspension, ondes de choc au sol, gerbes de particules aux couleurs du type et ombres de contact.
 
-Le tout tient en ~40 appels de rendu et ~26 000 triangles par image — largement dans le budget d'un téléphone milieu de gamme. Un réglage **Graphismes : Élevés / Légers** (menu Options) coupe les ombres et abaisse la résolution interne pour les appareils modestes.
+Le tout tient en ~40 appels de rendu et ~26 000 triangles par image — largement dans le budget d'un téléphone milieu de gamme, et la passe basse définition divise encore le coût de remplissage. Un réglage **Graphismes : Élevés / Légers** (menu Options) coupe les ombres pour les appareils modestes.
 
 ### Contenu généré par le code
 
-Rien n'est téléchargé : les cartes (villes, routes, grottes, arènes, intérieurs — **114 cartes**) sont générées de façon **déterministe** à partir d'une graine, les modèles 3D des créatures sont construits à partir de leur silhouette et de leurs types, et la bande-son chiptune est synthétisée en Web Audio.
+Rien n'est téléchargé : les cartes (villes, routes, grottes, arènes, intérieurs — **114 cartes**) sont générées de façon **déterministe** à partir d'une graine, les **217 modèles 3D** sont construits à la volée à partir d'un descripteur (14 silhouettes × 16 attributs × couleurs propres à l'espèce), et la bande-son chiptune est synthétisée en Web Audio.
+
+Aucun sprite ni aucune illustration Pokémon n'est copié dans le dépôt : les créatures sont des interprétations low-poly bâties par le code.
 
 ---
 
@@ -120,13 +149,14 @@ Le menu **Options** règle le son et le niveau de détail graphique.
 ```
 src/
   data/        types, capacités, espèces, objets, monde (zones, arènes, Ligue)
+               pokedex.gen.ts est généré — voir scripts/gen-pokedex.mjs
   engine/      rendu Three.js, entrées tactiles, audio chiptune, RNG déterministe
   world/       génération procédurale des cartes + scène 3D d'exploration
   creature/    construction procédurale des modèles 3D
   battle/      moteur de combat + scène 3D de combat
   game/        état de la partie, sauvegarde, modèle d'une créature
   ui/          dialogues, menus, sac, Dex, boutique, interface de combat
-scripts/       génération des icônes PWA + tests de bout en bout (Playwright)
+scripts/       génération du Pokédex et des icônes PWA + tests de bout en bout (Playwright)
 ```
 
 Tests de bout en bout, dans un vrai navigateur (Playwright) :
@@ -135,7 +165,7 @@ Tests de bout en bout, dans un vrai navigateur (Playwright) :
 npm test                # build + les trois suites
 npm run test:smoke      # écran-titre → nouvelle partie → exploration
 npm run test:battle     # combat sauvage complet
-npm run test:flow       # 114 cartes, arène, boutique, soins, badges, sauvegarde/rechargement
+npm run test:flow       # cohérence du Pokédex, 114 cartes, arène, boutique, soins, badges, sauvegarde
 ```
 
 Les captures d'écran atterrissent dans `screenshots/`. Sur une machine où Chromium

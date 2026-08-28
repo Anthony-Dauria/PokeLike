@@ -191,8 +191,14 @@ export class BattleUI {
 
   private async evolve(m: Mon, to: string) {
     const before = nameOf(m);
+    const alts = species(m.sp).evoAlt;
     const yes = await ask(`Hein ?! ${before} évolue !`, ['Laisser évoluer', 'Arrêter l’évolution']);
     if (yes === 1) { await this.log(`${before} n'a pas évolué…`, 900); return; }
+    // Certaines espèces (Évoli) ont plusieurs évolutions : le joueur choisit.
+    if (alts && alts.length > 1) {
+      const pick = await ask('Vers quelle forme ?', alts.map((a) => species(a).name));
+      to = alts[Math.max(0, Math.min(alts.length - 1, pick))];
+    }
     audio.sfx('evolve');
     const hpDiff = maxHp(m) - m.hp;
     m.sp = to;

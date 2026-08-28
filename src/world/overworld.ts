@@ -172,7 +172,7 @@ export class Overworld {
       case T.TAPIS: {
         // Damier d'intérieur, teinté par la couleur de l'Arène / du bâtiment.
         const a = new THREE.Color(checker ? pal.ground : pal.ground2);
-        if (accent !== undefined) a.lerp(new THREE.Color(accent), checker ? .3 : .12);
+        if (accent !== undefined) a.lerp(new THREE.Color(accent), checker ? .22 : .07);
         return a.multiplyScalar(1 + (jitter - .5) * .05);
       }
       case T.FLEUR: base = pal.ground2; break;
@@ -547,6 +547,42 @@ export class Overworld {
       });
       im.instanceMatrix.needsUpdate = true;
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
+
+    /* -- murs / bâtiments -- */
+    const mur = tiles[T.MUR] ?? [];
+    if (mur.length) {
+      const wallCol = map.indoor ? 0xb9c3d4 : 0xe2d6bf;
+      const im = inst(new THREE.BoxGeometry(1, 2.2, 1), toon(wallCol), mur.length);
+      const roof = inst(new THREE.BoxGeometry(1.1, .42, 1.1), toon(map.indoor ? (map.accent ?? 0x6b5240) : 0xc4564e), mur.length);
+      const trim = inst(new THREE.BoxGeometry(1.14, .12, 1.14), toon(map.indoor ? 0x7f8ba0 : 0x9c3f3a), mur.length);
+      const plinth = map.indoor ? inst(new THREE.BoxGeometry(1.04, .28, 1.04), toon(0x8a94a8), mur.length) : null;
+      // Façades sud : on pose une fenêtre sur les murs qui donnent sur l'extérieur.
+      const front = map.indoor ? [] : mur.filter(([x, y]) => y + 1 < map.h && map.tiles[(y + 1) * map.w + x] !== T.MUR);
+      const win = front.length ? inst(new THREE.BoxGeometry(.54, .52, .12), toon(0x9fd8ff, { emissive: 0x2a4f70 }), front.length, false) : null;
+      const sill = front.length ? inst(new THREE.BoxGeometry(.66, .08, .16), toon(0xf2ead8), front.length, false) : null;
+      mur.forEach(([x, y], i) => {
+        dummy.position.set(x, 1.1, y); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
+        dummy.position.set(x, 2.4, y);
+        dummy.updateMatrix(); roof.setMatrixAt(i, dummy.matrix);
+        dummy.position.set(x, 2.17, y);
+        dummy.updateMatrix(); trim.setMatrixAt(i, dummy.matrix);
+        if (plinth) { dummy.position.set(x, .14, y); dummy.updateMatrix(); plinth.setMatrixAt(i, dummy.matrix); }
+      });
+      front.forEach(([x, y], i) => {
+        if (!win || !sill) return;
+        dummy.position.set(x, 1.45, y + .5); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix(); win.setMatrixAt(i, dummy.matrix);
+        dummy.position.set(x, 1.16, y + .52);
+        dummy.updateMatrix(); sill.setMatrixAt(i, dummy.matrix);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      roof.instanceMatrix.needsUpdate = true;
+      trim.instanceMatrix.needsUpdate = true;
+      if (plinth) plinth.instanceMatrix.needsUpdate = true;
+      if (win) win.instanceMatrix.needsUpdate = true;
+      if (sill) sill.instanceMatrix.needsUpdate = true;
     }
 
     /* -- halos de plafonniers (intérieurs) -- */

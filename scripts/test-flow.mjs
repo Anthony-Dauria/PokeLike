@@ -37,8 +37,13 @@ await page.waitForTimeout(1500);
 // équipe surpuissante pour valider les combats scriptés
 await page.evaluate(() => {
   const g = window.pokelike;
-  ['nocteracine', 'abyssire', 'pyrodrakon', 'souverain', 'lunellia'].forEach((sp) => g.debugGive(sp, 70));
+  ['nocteracine', 'abyssire', 'pyrodrakon', 'dragonite', 'togekiss'].forEach((sp) => g.debugGive(sp, 70));
 });
+
+// 0. Cohérence des données : toute espèce citée doit exister
+const badRefs = await page.evaluate(() => window.pokelike.debugValidate());
+console.log('DEX:', await page.evaluate(() => window.pokelike.debugDexCount()), 'espèces | références invalides:', badRefs.length);
+if (badRefs.length) console.log(badRefs.slice(0, 30).join('\n'));
 
 // 1. Toutes les cartes se génèrent-elles ?
 const gen = await page.evaluate(async () => {
@@ -61,6 +66,16 @@ await page.evaluate(() => window.pokelike.debugGoto('in:bourg-aurore:center'));
 await page.waitForTimeout(1200);
 await page.screenshot({ path: `${OUT}/20-centre.png` });
 console.log('-- centre OK');
+
+// 2b. Dex rempli (aperçu)
+await page.evaluate(() => window.pokelike.debugSeeAll());
+await page.click('#menu-btn');   // clic réel : le HUD écoute pointerdown, pas click
+await page.waitForTimeout(500);
+const dexCard = page.locator('#overlay button.card').nth(2);   // 0=Équipe 1=Sac 2=Dex
+if (await dexCard.count()) { await dexCard.click(); await page.waitForTimeout(700); }
+await page.screenshot({ path: `${OUT}/32-dex.png` });
+try { await page.locator('#overlay .ov-head .round-btn').click({ timeout: 1500 }); } catch {}
+await page.waitForTimeout(400);
 
 // 3. Ville avec arène
 await page.evaluate(() => window.pokelike.debugGoto('serenis'));

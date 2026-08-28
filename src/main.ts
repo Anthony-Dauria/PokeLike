@@ -15,7 +15,7 @@ import {
   FINAL_BOSS, GYM, GYMS, LEAGUE, RIVAL_COUNTER, RIVAL_NAME, START_ZONE,
   STATIC_ENCOUNTERS, ZONE, type Enc, type Link,
 } from './data/world';
-import { evoLine, species } from './data/species';
+import { DEX, hasSpecies, species, stageForLevel } from './data/species';
 import { item as getItem } from './data/items';
 import { createMon, maxHp, nameOf } from './game/mon';
 import { makeTeam } from './battle/engine';
@@ -34,22 +34,16 @@ type Mode = 'title' | 'overworld' | 'battle' | 'busy';
 /* Évènements scénarisés du rival                                      */
 /* ------------------------------------------------------------------ */
 const RIVAL_EVENTS: { zone: string; flag: string; lv: number; extras: string[] }[] = [
-  { zone: 'route2', flag: 'rival1', lv: 12, extras: ['ratinoc', 'piafleur'] },
-  { zone: 'route5', flag: 'rival2', lv: 26, extras: ['aiglombre', 'voltiny', 'spectrille'] },
-  { zone: 'route8', flag: 'rival3', lv: 40, extras: ['nyxpanthre', 'magmalv', 'papilore', 'sablotin'] },
-  { zone: 'route10', flag: 'rival4', lv: 52, extras: ['nyxpanthre', 'chimerok', 'sylphibou', 'maremora', 'drakoral'] },
+  { zone: 'route2', flag: 'rival1', lv: 12, extras: ['rattata', 'pidgey'] },
+  { zone: 'route5', flag: 'rival2', lv: 26, extras: ['pidgeotto', 'shinx', 'gastly'] },
+  { zone: 'route8', flag: 'rival3', lv: 40, extras: ['sneasel', 'graveler', 'butterfree', 'machoke'] },
+  { zone: 'route10', flag: 'rival4', lv: 52, extras: ['staraptor', 'golem', 'kadabra', 'lapras', 'gabite'] },
 ];
-
-function stageFor(lineId: string, lv: number): string {
-  const line = evoLine(lineId);
-  const idx = lv >= 36 ? 2 : lv >= 16 ? 1 : 0;
-  return line[Math.min(idx, line.length - 1)];
-}
 
 function rivalTeam(lv: number, extras: string[]): [string, number][] {
   const starterLine = RIVAL_COUNTER[state.starter] ?? 'ondulin';
   const team: [string, number][] = extras.map((sp, i) => [sp, Math.max(2, lv - 2 + (i % 2))]);
-  team.push([stageFor(starterLine, lv), lv + 2]);
+  team.push([stageForLevel(starterLine, lv), lv + 2]);
   return team;
 }
 
@@ -75,6 +69,7 @@ class Game {
       onTrainerSight: (e) => void this.trainerSight(e),
     });
     setQualityHandler(() => this.applyQuality());
+    this.applyQuality();
     this.bindTitle();
     requestAnimationFrame((t) => this.loop(t));
   }
@@ -112,6 +107,7 @@ class Game {
   /** Applique le niveau de détail choisi (ombres + résolution interne). */
   applyQuality() {
     this.renderer.setQuality(state.quality);
+    this.renderer.setStyle(state.style);
     this.overworld.shadows = state.quality === 'haut';
     this.battleScene.shadows = state.quality === 'haut';
     if (this.overworld.loaded) {
@@ -564,7 +560,26 @@ class Game {
     return true;
   }
   debugMode() { return this.mode; }
+  /** Vérifie que toutes les espèces citées par les données du monde existent. */
+  debugValidate(): string[] {
+    const bad: string[] = [];
+    const check = (id: string, where: string) => { if (!hasSpecies(id)) bad.push(`${where}: ${id}`); };
+    for (const z of Object.values(ZONE)) for (const en of z.enc ?? []) check(en.sp, z.id);
+    for (const g of GYMS) for (const [sp] of g.team) check(sp, g.id);
+    for (const b of [...LEAGUE, FINAL_BOSS]) for (const [sp] of b.team) check(sp, b.id);
+    for (const st of STATIC_ENCOUNTERS) check(st.sp, st.flag);
+    for (const r of RIVAL_EVENTS) for (const sp of r.extras) check(sp, r.flag);
+    for (const sp of Object.values(RIVAL_COUNTER)) check(sp, 'rival-starter');
+    for (const s of DEX) {
+      if (s.evo) check(s.evo.to, `evo:${s.id}`);
+      for (const a of s.evoAlt ?? []) check(a, `evoAlt:${s.id}`);
+    }
+    return bad;
+  }
+  debugDexCount() { return DEX.length; }
+  debugSeeAll() { for (const s of DEX) { state.seen.add(s.id); if (s.dex % 3 === 0) state.caught.add(s.id); } }
   debugQuality(q: 'haut' | 'leger') { state.quality = q; this.applyQuality(); }
+  debugStyle(st: 'ds' | 'lisse') { state.style = st; this.applyQuality(); }
   debugShadows() { return this.renderer.gl.shadowMap.enabled; }
   debugPerf() {
     const i = this.renderer.gl.info;

@@ -12,8 +12,9 @@ import { ask, card, closeOverlay, hpColor, openOverlay, say, section, toast, typ
 /* -------------------- vignette d'espèce -------------------- */
 export function portrait(spId: string, shiny = false): HTMLElement {
   const sp = species(spId);
-  const a = TYPE_COLOR[sp.types[0]];
-  const b = TYPE_COLOR[sp.types[1] ?? sp.types[0]];
+  // Mêmes couleurs que le modèle 3D pour que la vignette « ressemble » à la créature.
+  const a = sp.body ?? TYPE_COLOR[sp.types[0]];
+  const b = sp.accent ?? TYPE_COLOR[sp.types[1] ?? sp.types[0]];
   const d = document.createElement('div');
   d.className = 'sprite';
   d.style.background = `linear-gradient(135deg, ${a}, ${b})`;
@@ -449,6 +450,16 @@ export function openOptions(onClose?: () => void) {
       openOptions(onClose);
     });
     body.append(soundBtn);
+    body.append(card((c) => {
+      c.innerHTML = `<div class="grow"><div class="row1"><span class="nm">Rendu</span></div>
+        <div class="sub">${state.style === 'ds' ? 'Écran DS — basse définition, palette 15 bits' : 'Lisse — pleine définition'}</div></div>`;
+    }, () => {
+      state.style = state.style === 'ds' ? 'lisse' : 'ds';
+      onQualityChange?.();
+      saveGame();
+      closeOverlay();
+      openOptions(onClose);
+    }));
     body.append(card((c) => {
       c.innerHTML = `<div class="grow"><div class="row1"><span class="nm">Graphismes</span></div>
         <div class="sub">${state.quality === 'haut' ? 'Élevés — ombres portées, pleine résolution' : 'Légers — sans ombres, meilleure autonomie'}</div></div>`;

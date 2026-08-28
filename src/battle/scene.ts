@@ -43,7 +43,6 @@ export class BattleScene {
   private fx: { obj: THREE.Object3D; life: number; max: number; vy: number; spin: number; grow?: number }[] = [];
   private shake = 0;
   private trainer: CreatureRig | null = null;
-  private motes: THREE.Points | null = null;
   shadows = true;
 
   private toon(c: number | string, o: THREE.MeshToonMaterialParameters = {}) {
@@ -56,7 +55,7 @@ export class BattleScene {
     this.scene = new THREE.Scene();
     this.mineRig = null; this.foeRig = null; this.trainer = null;
     this.mineShadow = null; this.foeShadow = null;
-    this.fx = []; this.motes = null;
+    this.fx = [];
 
     this.scene.fog = new THREE.Fog(a.fog, 18, 52);
     addSky(this.scene, a.skyTop, a.skyMid, a.skyLow, biome === 'grotte' || biome === 'interieur' ? .1 : .55);
@@ -119,21 +118,6 @@ export class BattleScene {
 
     /* --- décor de fond, deux profondeurs --- */
     this.buildScatter(a, rng);
-
-    /* --- poussières en suspension --- */
-    const n = 60;
-    const pos = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-      pos[i * 3] = (rng.next() - .5) * 22;
-      pos[i * 3 + 1] = .4 + rng.next() * 5;
-      pos[i * 3 + 2] = (rng.next() - .5) * 20 - 3;
-    }
-    const pg = new THREE.BufferGeometry();
-    pg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.motes = new THREE.Points(pg, new THREE.PointsMaterial({
-      color: biome === 'volcan' ? 0xffb877 : 0xffffff, size: .055, transparent: true, opacity: .35, fog: true,
-    }));
-    this.scene.add(this.motes);
 
     this.setFoe(foe, foeIsTrainer);
     if (mine) this.setMine(mine);
@@ -404,7 +388,6 @@ export class BattleScene {
       }
     }
     if (this.trainer) animateRig(this.trainer, this.t);
-    if (this.motes) this.motes.rotation.y = this.t * .04;
 
     for (let i = this.fx.length - 1; i >= 0; i--) {
       const p = this.fx[i];

@@ -54,7 +54,7 @@ await advance();
 await page.waitForTimeout(1200);
 
 // --- combat sauvage ---
-await page.evaluate(() => window.pokelike.debugWild('piafleur', 6));
+await page.evaluate(() => window.pokelike.debugWild('pidgey', 6));
 await page.waitForTimeout(2500);
 await page.screenshot({ path: `${OUT}/10-battle-intro.png` });
 const skipLog = async (n = 8) => {

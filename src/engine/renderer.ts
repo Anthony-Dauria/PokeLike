@@ -4,6 +4,7 @@ import * as THREE from 'three';
 export const uTime = { value: 0 };
 
 export type Quality = 'haut' | 'leger';
+export type Style = 'ds' | 'lisse';
 
 /** Rampe de dégradé pour le cel-shading (MeshToonMaterial). */
 let toonRamp: THREE.DataTexture | null = null;
@@ -17,10 +18,36 @@ export function toonGradient(): THREE.DataTexture {
   return toonRamp;
 }
 
+/* -------- passe « écran DS » : rendu basse définition + palette 15 bits -------- */
+const PIXEL_FRAG = /* glsl */`
+  uniform sampler2D tScene;
+  uniform float uLevels;
+  varying vec2 vUv;
+  void main() {
+    // Three rend toujours en linéaire dans une cible hors écran : on encode ici.
+    vec3 lin = texture2D(tScene, vUv).rgb;
+    vec3 c = mix(pow(lin, vec3(0.41666)) * 1.055 - 0.055, lin * 12.92, step(lin, vec3(0.0031308)));
+    // La DS affiche du 15 bits (32 niveaux par canal) : on quantifie pareil.
+    c = floor(c * uLevels + 0.5) / uLevels;
+    gl_FragColor = vec4(c, 1.0);
+  }
+`;
+const PIXEL_VERT = /* glsl */`
+  varying vec2 vUv;
+  void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+`;
+
 export class Renderer {
   readonly gl: THREE.WebGLRenderer;
   readonly camera: THREE.PerspectiveCamera;
   quality: Quality = 'haut';
+  style: Style = 'ds';
+  /** Côté court du rendu interne en mode DS (la console affichait 192 px). */
+  pixelShort = 232;
+  private target: THREE.WebGLRenderTarget | null = null;
+  private quad: THREE.Mesh | null = null;
+  private quadScene = new THREE.Scene();
+  private quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private dpr = 1;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -45,19 +72,59 @@ export class Renderer {
     this.resize();
   }
 
+  setStyle(st: Style) {
+    this.style = st;
+    this.resize();
+  }
+
+  /** (Re)crée la cible basse définition en respectant le rapport de l'écran. */
+  private ensureTarget(w: number, h: number) {
+    const short = this.pixelShort * (this.quality === 'haut' ? 1 : .85);
+    const tw = Math.max(64, Math.round(w < h ? short : (short * w) / h));
+    const th = Math.max(64, Math.round(w < h ? (short * h) / w : short));
+    if (this.target && this.target.width === tw && this.target.height === th) return;
+    this.target?.dispose();
+    this.target = new THREE.WebGLRenderTarget(tw, th, {
+      minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+      depthBuffer: true, samples: 0,
+    });
+    this.target.texture.colorSpace = THREE.LinearSRGBColorSpace;
+    if (!this.quad) {
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { tScene: { value: null }, uLevels: { value: 31 } },
+        vertexShader: PIXEL_VERT, fragmentShader: PIXEL_FRAG, depthTest: false, depthWrite: false,
+      });
+      this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+      this.quad.frustumCulled = false;
+      this.quadScene.add(this.quad);
+    }
+    (this.quad.material as THREE.ShaderMaterial).uniforms.tScene.value = this.target.texture;
+  }
+
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
     const cap = this.quality === 'haut' ? 2 : 1.35;
     // Sur les très grands écrans on réduit la résolution interne pour tenir 60 fps.
     const perf = w * h > 1_400_000 ? 0.82 : 1;
-    this.gl.setPixelRatio(Math.min(this.dpr, cap) * perf);
+    // En mode DS la définition interne est fixée par la cible : inutile de pousser le DPR.
+    this.gl.setPixelRatio(this.style === 'ds' ? Math.min(this.dpr, 2) : Math.min(this.dpr, cap) * perf);
     this.gl.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    if (this.style === 'ds') this.ensureTarget(w, h);
   }
 
   render(scene: THREE.Scene) {
+    if (this.style !== 'ds' || !this.target || !this.quad) {
+      this.gl.setRenderTarget(null);
+      this.gl.render(scene, this.camera);
+      return;
+    }
+    this.gl.setRenderTarget(this.target);
+    this.gl.clear();
     this.gl.render(scene, this.camera);
+    this.gl.setRenderTarget(null);
+    this.gl.render(this.quadScene, this.quadCam);
   }
 }
 
