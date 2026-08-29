@@ -76,15 +76,37 @@ function draw(size, hue, label, back) {
   return px;
 }
 
-const PACK = [
-  [16, [232, 168, 90]],   // Roucool
-  [25, [247, 208, 44]],   // Pikachu
-  [1, [127, 200, 168]],   // Bulbizarre
-];
-mkdirSync('public/sprites/back', { recursive: true });
-for (const [dex, hue] of PACK) {
-  writeFileSync(`public/sprites/${dex}.png`, encodePNG(96, draw(96, hue, dex, false)));
-  writeFileSync(`public/sprites/back/${dex}.png`, encodePNG(96, draw(96, hue, dex, true)));
+/*
+ * Par défaut : pack national factice dans public/sprites (numéros).
+ * Avec --out <dir> --ids a,b : images nommées par identifiant, pour vérifier le
+ * dossier versionné des espèces de Valmore. La destination est explicite afin que
+ * le test puisse écrire dans dist/ sans jamais toucher aux vraies images.
+ */
+const args = process.argv.slice(2);
+const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
+const out = arg('--out') ?? 'public/sprites';
+const ids = arg('--ids');
+
+mkdirSync(`${out}/back`, { recursive: true });
+if (ids) {
+  const liste = ids.split(',');
+  liste.forEach((id, i) => {
+    const hue = [[232, 118, 58], [90, 170, 230], [120, 200, 120]][i % 3];
+    writeFileSync(`${out}/${id}.png`, encodePNG(96, draw(96, hue, i + 1, false)));
+    writeFileSync(`${out}/back/${id}.png`, encodePNG(96, draw(96, hue, i + 1, true)));
+  });
+  writeFileSync(`${out}/index.json`, JSON.stringify({ ids: liste }, null, 2));
+  console.log(`images factices écrites dans ${out} : ${liste.join(', ')}`);
+} else {
+  const PACK = [
+    [16, [232, 168, 90]],   // Roucool
+    [25, [247, 208, 44]],   // Pikachu
+    [1, [127, 200, 168]],   // Bulbizarre
+  ];
+  for (const [dex, hue] of PACK) {
+    writeFileSync(`${out}/${dex}.png`, encodePNG(96, draw(96, hue, dex, false)));
+    writeFileSync(`${out}/back/${dex}.png`, encodePNG(96, draw(96, hue, dex, true)));
+  }
+  writeFileSync(`${out}/index.json`, JSON.stringify({ dex: PACK.map(([d]) => d) }, null, 2));
+  console.log(`pack factice écrit : ${PACK.length} espèces (face + dos) + index.json`);
 }
-writeFileSync('public/sprites/index.json', JSON.stringify({ dex: PACK.map(([d]) => d) }, null, 2));
-console.log(`pack factice écrit : ${PACK.length} espèces (face + dos) + index.json`);

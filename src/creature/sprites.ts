@@ -24,6 +24,18 @@ export interface PackSprite { tex: THREE.Texture; aspect: number; px: number }
 /** Définition de référence d'une planche de sprite (la DS travaillait en 96 px). */
 const FRAME_REF = 96;
 
+/** Dossier d'où provient l'image d'une espèce. */
+type Root = 'sprites' | 'valmore';
+
+interface RootState {
+  dir: string;
+  /** Liste éventuelle fournie par le dossier ; `null` = pas de manifeste. */
+  manifest: Promise<Set<string> | null> | null;
+  /** Sondages infructueux consécutifs : au-delà, on cesse de demander. */
+  misses: number;
+  off: boolean;
+}
+
 /** Transfert d'un tampon linéaire lu sur le GPU vers un PNG affichable. */
 function toDataURL(buf: Uint8Array, size: number): string {
   const c = document.createElement('canvas');
@@ -122,11 +134,18 @@ export class CreatureSprites {
   /** Vignettes d'interface déjà rendues, indexées par clé. */
   private portraits = new Map<string, string>();
   private packMiss = new Set<string>();
-  /** Liste éventuelle fournie par le pack ; `null` = pas de manifeste. */
-  private manifest: Promise<Set<number> | null> | null = null;
-  /** Sondages infructueux consécutifs : au-delà, on considère qu'il n'y a pas de pack. */
-  private misses = 0;
-  private packOff = false;
+  /**
+   * Deux dossiers d'images, suivis séparément :
+   *  - `sprites/`, le pack des espèces nationales, que le joueur installe et que
+   *    git ignore ;
+   *  - `valmore/`, les dessins des 9 espèces maison, qui appartiennent au jeu et
+   *    sont versionnés avec lui.
+   * Un dossier vide ne doit pas faire renoncer à l'autre, d'où un état par racine.
+   */
+  private roots: Record<Root, RootState> = {
+    sprites: { dir: './sprites', manifest: null, misses: 0, off: false },
+    valmore: { dir: './valmore', manifest: null, misses: 0, off: false },
+  };
   private scene = new THREE.Scene();
   private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, .01, 100);
 
@@ -287,18 +306,30 @@ export class CreatureSprites {
     return url;
   }
 
-  /** Lit `sprites/index.json` une seule fois, s'il existe. */
-  private loadManifest(): Promise<Set<number> | null> {
-    this.manifest ??= (async () => {
+  /**
+   * Où chercher l'image d'une espèce, et sous quel nom de fichier. Les espèces
+   * maison portent leur identifiant (brasillon.png), plus lisible à la main que
+   * leur numéro ; les autres gardent leur numéro national.
+   */
+  private locate(sp: Species): { st: RootState; key: string } {
+    return sp.custom
+      ? { st: this.roots.valmore, key: sp.id }
+      : { st: this.roots.sprites, key: String(sp.dex) };
+  }
+
+  /** Lit `<dossier>/index.json` une seule fois, s'il existe. */
+  private loadManifest(st: RootState): Promise<Set<string> | null> {
+    st.manifest ??= (async () => {
       try {
-        const res = await fetch('./sprites/index.json', { cache: 'force-cache' });
+        const res = await fetch(`${st.dir}/index.json`, { cache: 'force-cache' });
         if (!res.ok) return null;
         const raw: unknown = await res.json();
-        const list = Array.isArray(raw) ? raw : (raw as { dex?: number[] })?.dex;
-        return Array.isArray(list) ? new Set(list.map(Number)) : null;
+        const obj = raw as { dex?: unknown[]; ids?: unknown[] } | unknown[];
+        const list = Array.isArray(obj) ? obj : [...(obj?.dex ?? []), ...(obj?.ids ?? [])];
+        return Array.isArray(list) && list.length ? new Set(list.map(String)) : null;
       } catch { return null; }
     })();
-    return this.manifest;
+    return st.manifest;
   }
 
   /**
@@ -306,10 +337,11 @@ export class CreatureSprites {
    * l'interface, qui ont besoin d'une URL et non d'une texture.
    */
   async packUrl(sp: Species): Promise<string | null> {
-    if (sp.custom || this.packOff) return null;
-    const listed = await this.loadManifest();
-    if (listed && !listed.has(sp.dex)) return null;
-    const path = `./sprites/${sp.dex}.png`;
+    const { st, key } = this.locate(sp);
+    if (st.off) return null;
+    const listed = await this.loadManifest(st);
+    if (listed && !listed.has(key)) return null;
+    const path = `${st.dir}/${key}.png`;
     if (this.packHit.has(path)) return path;
     if (this.packMiss.has(path)) return null;
     try {
@@ -325,12 +357,13 @@ export class CreatureSprites {
    * `back/<dex>.png` est optionnel : on retombe sur la vue de face.
    */
   async pack(sp: Species, facing: Facing): Promise<PackSprite | null> {
-    if (sp.custom || this.packOff) return null;    // espèces maison : pas de pack attendu
-    const listed = await this.loadManifest();
-    if (listed && !listed.has(sp.dex)) return null;
+    const { st, key } = this.locate(sp);
+    if (st.off) return null;
+    const listed = await this.loadManifest(st);
+    if (listed && !listed.has(key)) return null;
     for (const path of facing === 'back'
-      ? [`./sprites/back/${sp.dex}.png`, `./sprites/${sp.dex}.png`]
-      : [`./sprites/${sp.dex}.png`]) {
+      ? [`${st.dir}/back/${key}.png`, `${st.dir}/${key}.png`]
+      : [`${st.dir}/${key}.png`]) {
       const hit = this.packHit.get(path);
       if (hit) return hit;
       if (this.packMiss.has(path)) continue;
@@ -340,7 +373,7 @@ export class CreatureSprites {
         if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
           this.packMiss.add(path);
           // Sans manifeste, trois échecs d'affilée signifient « aucun pack installé ».
-          if (!listed && ++this.misses >= 3) this.packOff = true;
+          if (!listed && ++st.misses >= 3) st.off = true;
           continue;
         }
         const { bmp, aspect, px, frame, flipped } = await prepare(await createImageBitmap(await res.blob()));
@@ -358,11 +391,11 @@ export class CreatureSprites {
         tex.userData.src = 'pack';
         const hit: PackSprite = { tex, aspect, px };
         this.packHit.set(path, hit);
-        this.misses = 0;
+        st.misses = 0;
         return hit;
       } catch {
         this.packMiss.add(path);
-        if (!listed && ++this.misses >= 3) this.packOff = true;
+        if (!listed && ++st.misses >= 3) st.off = true;
       }
     }
     return null;

@@ -25,7 +25,7 @@ const OUT = 'screenshots';
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.launch({ ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}), args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 
-async function run(label) {
+async function run(label, opts = {}) {
   const page = await browser.newPage({ viewport: { width: 412, height: 890 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
   const errors = [];
   page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
@@ -35,7 +35,8 @@ async function run(label) {
   await page.evaluate(() => window.pokelike.newGameQuick('Pack', 'brasillon'));
   await page.waitForTimeout(1400);
   // Pikachu (n°25) est dans le pack factice : il valide aussi la vue de dos.
-  await page.evaluate(() => window.pokelike.debugGiveLead('pikachu', 20));
+  // Pour les espèces de Valmore on garde le starter en tête, qui lit son propre dossier.
+  if (!opts.gardeStarter) await page.evaluate(() => window.pokelike.debugGiveLead('pikachu', 20));
   await page.evaluate(() => window.pokelike.debugWild('pidgey', 12));
   await page.waitForTimeout(2600);
   const src = await page.evaluate(() => window.pokelike.debugSpriteSource());
@@ -57,7 +58,14 @@ await cp('public/sprites', 'dist/sprites', { recursive: true });
 const avec = await run('avec-pack');
 console.log('avec pack   →', JSON.stringify(avec.src), 'orientation:', avec.sens, avec.errors.length ? 'ERREURS: ' + avec.errors.join(' | ') : '');
 
+// 3. images des espèces de Valmore : dossier séparé, nommé par identifiant.
+//    On écrit dans dist/ uniquement — public/valmore contient de vraies images.
+execFileSync(process.execPath, ['scripts/gen-test-sprites.mjs', '--out', 'dist/valmore', '--ids', 'brasillon'], { stdio: 'inherit' });
+const maison = await run('valmore', { gardeStarter: true });
+console.log('espèces maison →', JSON.stringify(maison.src), maison.errors.length ? 'ERREURS: ' + maison.errors.join(' | ') : '');
+
 // ménage : on ne laisse traîner aucun pack
+await rm('dist/valmore', { recursive: true, force: true });
 await rm('dist/sprites', { recursive: true, force: true });
 for (const f of ['1.png', '16.png', '25.png', 'index.json']) await rm(join('public/sprites', f), { force: true });
 await rm('public/sprites/back', { recursive: true, force: true });
@@ -65,8 +73,11 @@ await rm('public/sprites/back', { recursive: true, force: true });
 const ok = sans.src.foe === 'bake' && sans.src.mine === 'bake'
   && avec.src.foe === 'pack' && avec.src.mine === 'pack'
   && avec.sens === 'haut'
-  && !sans.errors.length && !avec.errors.length;
-if (!ok) console.log(`attendu : sans={bake,bake} avec={pack,pack} orientation=haut (obtenu ${avec.sens})`);
+  // Brasillon est une espèce de Valmore : son image vient de dist/valmore.
+  && maison.src.mine === 'pack'
+  && !sans.errors.length && !avec.errors.length && !maison.errors.length;
+if (!ok) console.log(`attendu : sans={bake,bake} avec={pack,pack} orientation=haut valmore.mine=pack`
+  + ` (obtenu orientation=${avec.sens}, valmore.mine=${maison.src.mine})`);
 console.log(ok ? 'SPRITES OK — cuisson et pack tous deux utilisés' : 'SPRITES ÉCHEC');
 await browser.close();
 server.close();
