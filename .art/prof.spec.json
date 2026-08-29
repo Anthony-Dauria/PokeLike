@@ -1,0 +1,6 @@
+{
+  "out": "public/valmore", "frameW": 256, "frameH": 256, "scale": 1.06, "pad": 0, "anchor": "centre",
+  "items": [
+    { "name": "prof-buste", "x": 1120, "y": 92, "w": 240, "h": 240 }
+  ]
+}

@@ -1,7 +1,7 @@
 import { TYPE_COLOR, type TypeName } from '../data/types';
 import { audio } from '../engine/audio';
 import { RIVAL_NAME } from '../data/world';
-import { humanPortrait } from './portraits';
+import { humanPortrait, type HumanId } from './portraits';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
@@ -37,20 +37,30 @@ function splitSpeaker(line: string): { who: string | null; text: string } {
   return m ? { who: m[1], text: m[2] } : { who: null, text: line };
 }
 
-/** Choisit le buste correspondant au nom affiché. */
-function faceFor(who: string): string {
-  if (/^(pr\.|prof)/i.test(who)) return humanPortrait('prof');
-  if (who === RIVAL_NAME) return humanPortrait('rival');
-  return humanPortrait('pnj');
+/** Quel personnage se cache derrière le nom affiché. */
+function idFor(who: string): HumanId {
+  if (/^(pr\.|prof)/i.test(who)) return 'prof';
+  if (who === RIVAL_NAME) return 'rival';
+  return 'pnj';
 }
+
+/**
+ * Dessins fournis pour certains personnages. Ils l'emportent sur le modèle 3D
+ * cuit à la volée ; si le fichier manque, `onerror` fait le repli tout seul.
+ */
+const DESSINS: Partial<Record<HumanId, string>> = {
+  prof: './valmore/prof-buste.png',
+};
 
 /** Met à jour la plaque d'interlocuteur ; la masque pour une narration. */
 function showSpeaker(who: string | null) {
   if (!who) { dlgSpeaker.hidden = true; return; }
-  const url = faceFor(who);
+  const id = idFor(who);
+  const dessin = DESSINS[id];
   dlgName.textContent = who;
-  dlgFace.src = url;
-  dlgFace.hidden = !url;
+  dlgFace.onerror = () => { dlgFace.onerror = null; dlgFace.src = humanPortrait(id); };
+  dlgFace.src = dessin ?? humanPortrait(id);
+  dlgFace.hidden = false;
   dlgSpeaker.hidden = false;
 }
 

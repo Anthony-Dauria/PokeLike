@@ -39,6 +39,18 @@ image garde son modèle 3D procédural : le dossier peut rester partiel.
 - Les pieds doivent toucher le bas du sujet : le sprite est posé sur la
   plateforme par son bord inférieur.
 
+## Personnages
+
+Le même dossier accueille les bustes des personnages dessinés, qui l'emportent
+sur le modèle 3D dans la boîte de dialogue :
+
+```
+public/valmore/prof-buste.png    → Pr. Ombelle
+```
+
+Cadre carré, tête et épaules, fond transparent. Si le fichier manque, le jeu
+retombe sur le buste cuit depuis le modèle procédural.
+
 ## index.json (facultatif)
 
 ```json
