@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { T, WALKABLE, type Ent, type GameMap } from './mapgen';
 import { tileTexture, type TileFamily } from './tiletex';
+import { billboardGeometry, sprite2d, spriteMaterial, TILT } from './sprites2d';
 import { state } from '../game/state';
 import { animateRig, buildHuman, type CreatureRig } from '../creature/model';
 import { RNG, hashStr } from '../engine/rng';
@@ -429,6 +430,8 @@ export class Overworld {
         });
         im.instanceMatrix.needsUpdate = true; arms.instanceMatrix.needsUpdate = true;
         if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      } else if (this.arbresDessines(obs, rng)) {
+        // Arbres dessinés : rien d'autre à construire, cf. addArbres.
       } else {
         const snowy = pal.prop === 'snowtree';
         const trunkMat = toon(pal.trunk);
@@ -587,8 +590,30 @@ export class Overworld {
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
     }
 
-    /* -- murs / bâtiments -- */
-    const mur = tiles[T.MUR] ?? [];
+    /* -- bâtiments dessinés --
+       Chaque porte identifie un édifice : on remonte à ses murs par propagation,
+       on pose un panneau à sa taille, et ces tuiles sortent du rendu en boîtes.
+       La collision, elle, ne change pas : les murs restent infranchissables. */
+    const murBati = new Set<number>();
+    const portesDessinees = new Set<number>();
+    if (!map.indoor) {
+      for (const e of map.ents) {
+        if (e.kind !== 'door') continue;
+        const tuiles = this.batimentTiles(map, e.x, e.y);
+        if (!tuiles.length) continue;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const [tx, ty] of tuiles) {
+          murBati.add(ty * map.w + tx);
+          x0 = Math.min(x0, tx); x1 = Math.max(x1, tx);
+          y0 = Math.min(y0, ty); y1 = Math.max(y1, ty);
+        }
+        this.addBatiment(nomBatiment(e.to, e.label), x0, y0, x1, y1);
+        portesDessinees.add(e.y * map.w + e.x);
+      }
+    }
+
+    /* -- murs restants : intérieurs et clôtures, toujours en volumes -- */
+    const mur = (tiles[T.MUR] ?? []).filter(([x, y]) => !murBati.has(y * map.w + x));
     if (mur.length) {
       const wallCol = map.indoor ? 0xb9c3d4 : 0xe2d6bf;
       // Bardage et tuiles : le nombre de répétitions suit les dimensions du volume,
@@ -664,6 +689,8 @@ export class Overworld {
     /* -- portes & sorties -- */
     for (const e of map.ents) {
       if (e.kind === 'door') {
+        // Le dessin du bâtiment contient déjà sa porte : inutile d'en poser une.
+        if (portesDessinees.has(e.y * map.w + e.x)) continue;
         const frame = new THREE.Mesh(new THREE.BoxGeometry(1.16, 2, .3), toon(0x5b3f2c));
         frame.position.set(e.x, 1, e.y - .45);
         frame.castShadow = true; frame.receiveShadow = true;
@@ -818,6 +845,88 @@ export class Overworld {
       this.scene.add(rig.group);
       this.actors.push({ ent: e, rig });
     }
+  }
+
+  /**
+   * Murs formant le bâtiment auquel appartient une porte. On part des voisins de
+   * la porte et on propage sur les T.MUR contigus : le générateur pose les
+   * édifices en rectangles pleins, la propagation suffit donc à les cerner.
+   */
+  private batimentTiles(map: GameMap, dx: number, dy: number): [number, number][] {
+    const vu = new Set<number>();
+    const out: [number, number][] = [];
+    const pile: [number, number][] = [];
+    const pousse = (x: number, y: number) => {
+      if (x < 0 || y < 0 || x >= map.w || y >= map.h) return;
+      const k = y * map.w + x;
+      if (vu.has(k) || map.tiles[k] !== T.MUR) return;
+      vu.add(k); pile.push([x, y]);
+    };
+    for (const [ox, oy] of [[0, -1], [-1, 0], [1, 0], [0, 1], [-1, -1], [1, -1]]) pousse(dx + ox, dy + oy);
+    while (pile.length) {
+      const [x, y] = pile.pop()!;
+      out.push([x, y]);
+      pousse(x - 1, y); pousse(x + 1, y); pousse(x, y - 1); pousse(x, y + 1);
+    }
+    // La porte occupe une tuile du rectangle : on la compte pour le cadrage.
+    out.push([dx, dy]);
+    return out;
+  }
+
+  /**
+   * Arbres en panneaux dessinés, groupés par essence en maillages instanciés :
+   * une centaine d'arbres tient ainsi en trois appels de rendu au lieu de cent.
+   * Retourne false si les images manquent, auquel cas l'appelant garde ses cônes.
+   */
+  private arbresDessines(obs: [number, number][], rng: RNG): boolean {
+    const essences = ['sapin', 'arbre-fonce', 'arbre-clair'];
+    if (!essences.every((n) => sprite2d(n).ready)) {
+      // Premier chargement : on demande les images et on laisse les cônes pour
+      // cette carte. La suivante, elles seront en cache.
+      for (const n of essences) sprite2d(n, () => {});
+      return false;
+    }
+    const lots: [number, number][][] = essences.map(() => []);
+    for (const t of obs) lots[rng.int(essences.length)].push(t);
+    essences.forEach((nom, k) => {
+      const tuiles = lots[k];
+      if (!tuiles.length) return;
+      const s = sprite2d(nom);
+      const im = new THREE.InstancedMesh(billboardGeometry(), spriteMaterial(s), tuiles.length);
+      const d = new THREE.Object3D();
+      tuiles.forEach(([x, y], i) => {
+        const h = 2.1 + rng.next() * .7;
+        d.position.set(x + (rng.next() - .5) * .28, 0, y + .18);
+        d.rotation.set(TILT, 0, 0);
+        d.scale.set(h * s.aspect, h, 1);
+        d.updateMatrix();
+        im.setMatrixAt(i, d.matrix);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;
+      this.scene.add(im);
+    });
+    return true;
+  }
+
+  /** Pose le panneau d'un bâtiment sur l'emprise donnée. */
+  private addBatiment(nom: string, x0: number, _y0: number, x1: number, y1: number) {
+    const s = sprite2d(nom);
+    const mesh = new THREE.Mesh(billboardGeometry(), spriteMaterial(s));
+    // Base sur la façade avant : incliné vers la caméra, le panneau recouvre
+    // ensuite toute la profondeur de l'emprise.
+    mesh.position.set((x0 + x1) / 2, 0, y1 + .2);
+    mesh.rotation.x = TILT;
+    const ajuste = () => {
+      // Le panneau couvre l'emprise, sans plus : incliné vers la caméra il paraît
+      // déjà plus haut qu'un mur droit de même taille.
+      const larg = (x1 - x0 + 1) + .2;
+      mesh.scale.set(larg, larg / (s.aspect || 1), 1);
+    };
+    ajuste();
+    // Le rapport n'est connu qu'au chargement : on recadre à l'arrivée de l'image.
+    sprite2d(nom, ajuste);
+    this.scene.add(mesh);
   }
 
   /* ---------------- requêtes ---------------- */
@@ -1070,6 +1179,18 @@ export class Overworld {
       }
     }
   }
+}
+
+/** Quel dessin de bâtiment employer pour une porte donnée. */
+function nomBatiment(to: string, label: string): string {
+  if (/:center$/.test(to)) return 'centre';
+  if (/:shop$/.test(to)) return 'mart';
+  if (/^gym:/.test(to) || /^league:/.test(to)) return 'arene';
+  if (/bibli|école|ecole|savant|étude/i.test(label)) return 'bibliotheque';
+  if (/phare/i.test(label)) return 'phare';
+  // Les maisons alternent pour éviter des rues entièrement identiques.
+  const n = Number(/house(\d+)$/.exec(to)?.[1] ?? 0);
+  return n % 3 === 1 ? 'bibliotheque' : 'maison';
 }
 
 export function faceAngle(f: number): number {

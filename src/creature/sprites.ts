@@ -27,10 +27,16 @@ const FRAME_REF = 96;
 /** Dossier d'où provient l'image d'une espèce. */
 type Root = 'sprites' | 'valmore';
 
+interface Manifeste {
+  /** Clés disponibles de face ; `null` = pas de manifeste, on sonde à l'aveugle. */
+  face: Set<string> | null;
+  /** Clés disposant d'une vue de dos ; `null` = inconnu, on tente. */
+  dos: Set<string> | null;
+}
+
 interface RootState {
   dir: string;
-  /** Liste éventuelle fournie par le dossier ; `null` = pas de manifeste. */
-  manifest: Promise<Set<string> | null> | null;
+  manifest: Promise<Manifeste> | null;
   /** Sondages infructueux consécutifs : au-delà, on cesse de demander. */
   misses: number;
   off: boolean;
@@ -317,17 +323,26 @@ export class CreatureSprites {
       : { st: this.roots.sprites, key: String(sp.dex) };
   }
 
-  /** Lit `<dossier>/index.json` une seule fois, s'il existe. */
-  private loadManifest(st: RootState): Promise<Set<string> | null> {
+  /**
+   * Lit `<dossier>/index.json` une seule fois, s'il existe. Le champ `back` permet
+   * de dire quelles espèces ont une vue de dos : sans lui, chaque combat tente un
+   * fichier absent et laisse une erreur 404 dans la console.
+   */
+  private loadManifest(st: RootState): Promise<Manifeste> {
     st.manifest ??= (async () => {
+      const vide: Manifeste = { face: null, dos: null };
       try {
         const res = await fetch(`${st.dir}/index.json`, { cache: 'force-cache' });
-        if (!res.ok) return null;
+        if (!res.ok) return vide;
         const raw: unknown = await res.json();
-        const obj = raw as { dex?: unknown[]; ids?: unknown[] } | unknown[];
+        const obj = raw as { dex?: unknown[]; ids?: unknown[]; back?: unknown[] } | unknown[];
         const list = Array.isArray(obj) ? obj : [...(obj?.dex ?? []), ...(obj?.ids ?? [])];
-        return Array.isArray(list) && list.length ? new Set(list.map(String)) : null;
-      } catch { return null; }
+        const dos = Array.isArray(obj) ? undefined : obj?.back;
+        return {
+          face: Array.isArray(list) && list.length ? new Set(list.map(String)) : null,
+          dos: Array.isArray(dos) ? new Set(dos.map(String)) : null,
+        };
+      } catch { return vide; }
     })();
     return st.manifest;
   }
@@ -339,8 +354,8 @@ export class CreatureSprites {
   async packUrl(sp: Species): Promise<string | null> {
     const { st, key } = this.locate(sp);
     if (st.off) return null;
-    const listed = await this.loadManifest(st);
-    if (listed && !listed.has(key)) return null;
+    const man = await this.loadManifest(st);
+    if (man.face && !man.face.has(key)) return null;
     const path = `${st.dir}/${key}.png`;
     if (this.packHit.has(path)) return path;
     if (this.packMiss.has(path)) return null;
@@ -359,9 +374,12 @@ export class CreatureSprites {
   async pack(sp: Species, facing: Facing): Promise<PackSprite | null> {
     const { st, key } = this.locate(sp);
     if (st.off) return null;
-    const listed = await this.loadManifest(st);
-    if (listed && !listed.has(key)) return null;
-    for (const path of facing === 'back'
+    const man = await this.loadManifest(st);
+    if (man.face && !man.face.has(key)) return null;
+    // Vue de dos : on ne la demande que si le manifeste la déclare, ou faute de
+    // manifeste. Sinon on passe directement à la vue de face.
+    const avecDos = facing === 'back' && (!man.dos || man.dos.has(key));
+    for (const path of avecDos
       ? [`${st.dir}/back/${key}.png`, `${st.dir}/${key}.png`]
       : [`${st.dir}/${key}.png`]) {
       const hit = this.packHit.get(path);
@@ -373,7 +391,7 @@ export class CreatureSprites {
         if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
           this.packMiss.add(path);
           // Sans manifeste, trois échecs d'affilée signifient « aucun pack installé ».
-          if (!listed && ++st.misses >= 3) st.off = true;
+          if (!man.face && ++st.misses >= 3) st.off = true;
           continue;
         }
         const { bmp, aspect, px, frame, flipped } = await prepare(await createImageBitmap(await res.blob()));
@@ -395,7 +413,7 @@ export class CreatureSprites {
         return hit;
       } catch {
         this.packMiss.add(path);
-        if (!listed && ++st.misses >= 3) st.off = true;
+        if (!man.face && ++st.misses >= 3) st.off = true;
       }
     }
     return null;

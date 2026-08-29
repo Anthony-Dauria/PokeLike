@@ -14,7 +14,7 @@ export default defineConfig({
         // qu'au fil des rencontres.
         // Les dessins de Valmore font partie du jeu, comme les icônes : ils sont
         // pré-cachés pour qu'une première partie hors ligne montre les starters.
-        globPatterns: ['**/*.{js,css,html,svg,woff2}', 'icons/*.png', 'valmore/*.png'],
+        globPatterns: ['**/*.{js,css,html,svg,woff2}', 'icons/*.png', 'valmore/*.png', 'monde/*.png'],
         globIgnores: ['**/sprites/**'],
 
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
@@ -23,7 +23,7 @@ export default defineConfig({
         runtimeCaching: [{
           // Chaque sprite réellement affiché est gardé : la partie reste jouable
           // hors ligne, sprites compris, une fois les espèces rencontrées.
-          urlPattern: ({ url }) => url.pathname.includes('/sprites/') || url.pathname.includes('/valmore/'),
+          urlPattern: ({ url }) => url.pathname.includes('/sprites/'),
           handler: 'CacheFirst',
           options: {
             cacheName: 'pokelike-sprites',

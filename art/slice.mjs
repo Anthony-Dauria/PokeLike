@@ -49,21 +49,71 @@ const sorties = await page.evaluate(async ({ b64, spec }) => {
     if (py > 0) pousse(px, py - 1);
     if (py < H - 1) pousse(px, py + 1);
   }
+  // --- érosion du liseré de « sticker » ---
+  // La planche entoure chaque sujet d'un contour clair très peu saturé. Conservé,
+  // il dessine un halo blanc autour de chaque sprite une fois en jeu. On absorbe
+  // donc dans le fond les pixels clairs et gris qui le touchent, sur deux passes :
+  // assez pour le liseré, trop peu pour entamer une surface blanche du dessin.
+  for (let passe = 0; passe < 2; passe++) {
+    const ajout = [];
+    for (let y = 1; y < H - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const q = y * W + x;
+        if (fond[q]) continue;
+        const i = q * 4;
+        const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+        if (mn < 190 || mx - mn > 40) continue;
+        if (fond[q - 1] || fond[q + 1] || fond[q - W] || fond[q + W]) ajout.push(q);
+      }
+    }
+    for (const q of ajout) fond[q] = 1;
+  }
+
   for (let q = 0; q < W * H; q++) if (fond[q]) d[q * 4 + 3] = 0;
+  // --- débordement de couleur sous la transparence ---
+  // Les pixels devenus transparents gardent leur blanc d'origine ; le filtrage le
+  // mélange aux bords du sujet. On repeint l'anneau avec la couleur des voisins.
+  let bord = new Uint8Array(W * H);
+  for (let q = 0; q < W * H; q++) bord[q] = d[q * 4 + 3] > 0 ? 1 : 0;
+  for (let passe = 0; passe < 4; passe++) {
+    const suivant = new Uint8Array(bord);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const q = y * W + x;
+        if (bord[q]) continue;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (const [ox, oy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
+          const nx = x + ox, ny = y + oy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const nq = ny * W + nx;
+          if (!bord[nq]) continue;
+          r += d[nq * 4]; g += d[nq * 4 + 1]; b += d[nq * 4 + 2]; n++;
+        }
+        if (!n) continue;
+        d[q * 4] = Math.round(r / n); d[q * 4 + 1] = Math.round(g / n); d[q * 4 + 2] = Math.round(b / n);
+        suivant[q] = 1;
+      }
+    }
+    bord = suivant;
+  }
   sx.putImageData(img, 0, 0);
 
   const out = [];
   for (const it of spec.items) {
     const s = it.scale ?? spec.scale ?? 1;
-    const fw = it.frameW ?? spec.frameW, fh = it.frameH ?? spec.frameH;
     const dw = Math.max(1, Math.round(it.w * s)), dh = Math.max(1, Math.round(it.h * s));
+    // « tight » : cadre collé au sujet, pour les décors dimensionnés par le code.
+    const serre = it.tight ?? spec.tight;
+    const pad = spec.pad ?? 2;
+    const fw = serre ? dw + pad * 2 : (it.frameW ?? spec.frameW);
+    const fh = serre ? dh + pad * 2 : (it.frameH ?? spec.frameH);
     const c = new OffscreenCanvas(fw, fh); const cx = c.getContext('2d');
     cx.imageSmoothingEnabled = true;
     cx.imageSmoothingQuality = 'high';
     // Centré horizontalement, calé en bas : le sprite pose sur le sol.
-    const ancre = it.anchor ?? spec.anchor ?? 'bas';
+    const ancre = serre ? 'centre' : (it.anchor ?? spec.anchor ?? 'bas');
     const px = Math.round((fw - dw) / 2);
-    const py = ancre === 'centre' ? Math.round((fh - dh) / 2) : fh - dh - (spec.pad ?? 2);
+    const py = ancre === 'centre' ? Math.round((fh - dh) / 2) : fh - dh - pad;
     cx.drawImage(src, it.x, it.y, it.w, it.h, px, py, dw, dh);
     const blob = await c.convertToBlob({ type: 'image/png' });
     const buf = new Uint8Array(await blob.arrayBuffer());

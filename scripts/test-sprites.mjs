@@ -64,11 +64,19 @@ execFileSync(process.execPath, ['scripts/gen-test-sprites.mjs', '--out', 'dist/v
 const maison = await run('valmore', { gardeStarter: true });
 console.log('espèces maison →', JSON.stringify(maison.src), maison.errors.length ? 'ERREURS: ' + maison.errors.join(' | ') : '');
 
-// ménage : on ne laisse traîner aucun pack
+// Ménage : on ne laisse traîner aucun pack factice. dist/valmore est reconstruit
+// depuis public/, sinon on emporterait les vraies images du jeu avec les fausses
+// et tout ce qui tourne ensuite sur ce dist les chercherait en vain.
 await rm('dist/valmore', { recursive: true, force: true });
+await cp('public/valmore', 'dist/valmore', { recursive: true });
 await rm('dist/sprites', { recursive: true, force: true });
-for (const f of ['1.png', '16.png', '25.png', 'index.json']) await rm(join('public/sprites', f), { force: true });
+await cp('public/sprites', 'dist/sprites', { recursive: true });
+for (const f of ['1.png', '16.png', '25.png', 'index.json']) {
+  await rm(join('public/sprites', f), { force: true });
+  await rm(join('dist/sprites', f), { force: true });
+}
 await rm('public/sprites/back', { recursive: true, force: true });
+await rm('dist/sprites/back', { recursive: true, force: true });
 
 const ok = sans.src.foe === 'bake' && sans.src.mine === 'bake'
   && avec.src.foe === 'pack' && avec.src.mine === 'pack'
