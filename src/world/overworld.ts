@@ -1046,7 +1046,7 @@ export class Overworld {
 
   /** Vecteur unitaire de l'orientation courante (x = est, y = sud). */
   private aim(): [number, number] {
-    return [-Math.sin(this.heading), Math.cos(this.heading)];
+    return [Math.sin(this.heading), Math.cos(this.heading)];
   }
 
   removeEnt(key: string) {
@@ -1198,7 +1198,7 @@ export class Overworld {
     if (this.fits(this.px, this.py + uy * sp)) this.py += uy * sp;
 
     // On tourne vers la direction poussée par le plus court chemin.
-    const cible = Math.atan2(-ux, uy);
+    const cible = headingOf(ux, uy);
     let d = cible - this.heading;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     this.heading += d * Math.min(1, dt * 14);
@@ -1284,13 +1284,32 @@ function nomBatiment(to: string, label: string): string {
   return n % 3 === 1 ? 'bibliotheque' : 'maison';
 }
 
+/**
+ * Angle de rotation correspondant à un indice de direction.
+ *
+ * Déduit de DIRV, et non plus d'une table écrite à part : l'ancienne donnait
+ * +π/2 pour l'ouest, ce qui tourne le modèle vers l'est. Est et ouest étaient
+ * donc inversés pour le joueur comme pour les PNJ — un dresseur regardait à
+ * l'opposé de la ligne où il guettait. Le nord et le sud, eux, tombaient juste,
+ * ce qui rendait le défaut discret.
+ *
+ * Un modèle regarde +Z au repos ; tourné de θ, il regarde (sin θ, cos θ).
+ * Prendre atan2(dx, dy) garantit donc l'accord avec le vecteur de DIRV.
+ */
 export function faceAngle(f: number): number {
-  return [0, Math.PI / 2, Math.PI, -Math.PI / 2][f] ?? 0;
+  const [dx, dy] = DIRV[f] ?? DIRV[0];
+  return Math.atan2(dx, dy);
+}
+
+/** Angle de rotation pour une direction quelconque, dans la même convention. */
+export function headingOf(dx: number, dy: number): number {
+  return Math.atan2(dx, dy);
 }
 
 /** Indice de direction le plus proche d'une orientation continue. */
 export function facingOf(rad: number): number {
-  return ((Math.round(rad / (Math.PI / 2)) % 4) + 4) % 4;
+  const dx = Math.sin(rad), dy = Math.cos(rad);
+  return Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 3) : (dy < 0 ? 2 : 0);
 }
 
 export function entKey(map: GameMap, e: Ent): string {
