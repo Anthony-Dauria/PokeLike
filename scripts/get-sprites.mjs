@@ -113,7 +113,7 @@ async function pool(items, n, job) {
 
 /* -------------------- index.json -------------------- */
 
-/** Liste les numéros réellement présents dans le dossier. */
+/** Liste les numéros réellement présents dans un dossier. */
 async function presents(dir) {
   if (!existsSync(dir)) return [];
   const noms = await readdir(dir);
@@ -124,10 +124,16 @@ async function presents(dir) {
     .sort((a, b) => a - b);
 }
 
+/**
+ * Écrit le manifeste. `back` recense les espèces dont la vue de dos existe : sans
+ * cette liste, le jeu tente le fichier pour chacune et laisse une erreur 404 dans
+ * la console pour toutes celles qui n'en ont pas.
+ */
 async function writeIndex(outDir) {
   const dex = await presents(outDir);
-  await writeFile(path.join(outDir, 'index.json'), JSON.stringify({ dex }) + '\n');
-  return dex;
+  const back = await presents(path.join(outDir, 'back'));
+  await writeFile(path.join(outDir, 'index.json'), JSON.stringify({ dex, back }) + '\n');
+  return { dex, back };
 }
 
 /* -------------------- principal -------------------- */
@@ -170,8 +176,8 @@ async function main() {
   const backDir = path.join(outDir, 'back');
 
   if (o.indexOnly) {
-    const dex = await writeIndex(outDir);
-    console.log(`index.json écrit : ${dex.length} sprite(s) recensé(s).`);
+    const { dex, back } = await writeIndex(outDir);
+    console.log(`index.json écrit : ${dex.length} de face, ${back.length} de dos.`);
     return;
   }
 
@@ -226,12 +232,12 @@ async function main() {
   });
 
   if (process.stdout.isTTY) process.stdout.write('\r');
-  const dex = await writeIndex(outDir);
+  const { dex, back } = await writeIndex(outDir);
 
   console.log(`\nPack : ${outDir}`);
   console.log(`  téléchargés   ${bilan.ok}`);
   if (bilan.garde) console.log(`  déjà présents ${bilan.garde}   (--force pour les remplacer)`);
-  if (o.back) console.log(`  vues de dos   ${bilan.dos}`);
+  if (o.back) console.log(`  vues de dos   ${back.length}`);
   console.log(`  couverture    ${dex.length}/${liste.length} espèces (${Math.round(dex.length / liste.length * 100)} %)`);
   if (bilan.absent.length) console.log(`  introuvables  ${bilan.absent.length} (404) : ${bilan.absent.slice(0, 12).join(', ')}${bilan.absent.length > 12 ? '…' : ''}`);
   for (const e of bilan.erreur.slice(0, 8)) console.log(`  ✗ ${e}`);
