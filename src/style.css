@@ -69,6 +69,18 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 #dialogue .box{background:var(--panel-2);color:var(--ink);
   border:3px solid var(--line);border-radius:14px;padding:16px 18px;min-height:96px;
   box-shadow:inset 0 0 0 3px #cfd8e8,0 -6px 26px rgba(0,0,0,.45)}
+/* Chaîne évolutive du Pokédex */
+.evo-chain{display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:center}
+.evo-step{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:64px}
+.evo-step span{font-size:.78rem;font-weight:700;text-align:center;line-height:1.15}
+.evo-step.evo-here span{color:var(--acc)}
+.evo-step.evo-here .sprite{outline:2px solid var(--acc);outline-offset:1px}
+.evo-arrow{display:flex;flex-direction:column;align-items:center;color:var(--muted);line-height:1}
+.evo-arrow span{font-size:1.1rem}
+.evo-arrow b{font-size:.72rem;white-space:nowrap}
+.evo-unknown{display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:900;
+  color:var(--muted);background:#0e1725;border-style:dashed}
+
 /* Écran-titre réduit à son décor : sert de fond à l'introduction. Il repasse
    sous les menus et la boîte de dialogue, qu'il masquait à z-index 40. */
 #title.as-backdrop{pointer-events:none;z-index:1}

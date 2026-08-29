@@ -35,6 +35,10 @@ await shot('01-title');
 // Nouvelle partie
 await page.click('[data-act="new"]');
 await page.waitForTimeout(500);
+// choix du sexe (obligatoire, avant la saisie du nom)
+await page.locator('#overlay button.card').first().click();
+await page.waitForTimeout(400);
+await shot('01b-genre');
 // saisie du nom
 await page.fill('#overlay input', 'Testeur');
 await page.click('#overlay .btn.primary');

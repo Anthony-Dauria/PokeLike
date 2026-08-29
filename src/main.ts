@@ -204,9 +204,9 @@ class Game {
 
   private chooseStarter(): Promise<void> {
     const opts: [string, string][] = [
-      ['brasillon', 'Feu — évolue en Feu/Dragon'],
-      ['ondulin', 'Eau — évolue en Eau/Spectre'],
-      ['germinuit', 'Plante — évolue en Plante/Ténèbres'],
+      ['brasillon', 'Feu · 2 évolutions, jusqu’à Feu/Dragon'],
+      ['ondulin', 'Eau · 2 évolutions, jusqu’à Eau/Spectre'],
+      ['germinuit', 'Plante · 2 évolutions, jusqu’à Plante/Ténèbres'],
     ];
     return new Promise((resolve) => {
       let chosen = false;

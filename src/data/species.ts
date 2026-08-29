@@ -147,8 +147,15 @@ const ALL: Species[] = [
 ];
 
 export const SPECIES: Record<string, Species> = Object.fromEntries(ALL.map((s) => [s.id, s]));
-/** Trié pour l'affichage du Dex : exclusivités d'abord, puis numéro national. */
-export const DEX: Species[] = [...ALL].sort((a, b) => a.dex - b.dex);
+/**
+ * Trié pour l'affichage du Dex : exclusivités de Valmore d'abord (numéros 1101+),
+ * puis le Pokédex national. Un tri sur le seul numéro les renvoyait en queue de
+ * liste, où personne ne les voyait.
+ */
+export const DEX: Species[] = [...ALL].sort((a, b) => {
+  const ca = a.custom ? 0 : 1, cb = b.custom ? 0 : 1;
+  return ca !== cb ? ca - cb : a.dex - b.dex;
+});
 
 export function species(id: string): Species {
   const s = SPECIES[id];

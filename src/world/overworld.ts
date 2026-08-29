@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { T, WALKABLE, type Ent, type GameMap } from './mapgen';
+import { tileTexture, type TileFamily } from './tiletex';
 import { state } from '../game/state';
 import { animateRig, buildHuman, type CreatureRig } from '../creature/model';
 import { RNG, hashStr } from '../engine/rng';
@@ -264,40 +265,59 @@ export class Overworld {
       return out;
     };
 
-    const n = W * H;
-    const pos = new Float32Array(n * 4 * 3);
-    const col = new Float32Array(n * 4 * 3);
-    const idx = new Uint32Array(n * 6);
-    let v = 0, f = 0;
+    /* --- un maillage par matière : chacune porte son motif pixel, répété à la
+           case. Les UV suivent les coordonnées du monde, donc les motifs se
+           raccordent d'une tuile à l'autre sans couture. --- */
+    const matiere = (t: number): TileFamily =>
+      t === T.EAU ? 'eau'
+        : t === T.SABLE ? 'sable'
+          : t === T.CHEMIN || t === T.SORTIE ? 'chemin'
+            : t === T.MUR || t === T.OBSTACLE ? 'roche'
+              : t === T.TAPIS || t === T.COMPTOIR ? 'sol'
+                // T.SOL, c'est le terrain nu : de la pelouse dehors, du carrelage dedans.
+                // T.HERBE désigne les hautes herbes, pas le sol ordinaire.
+                : map.indoor ? 'sol' : 'herbe';
+
+    interface Lot { pos: number[]; col: number[]; uv: number[]; idx: number[] }
+    const lots = new Map<TileFamily, Lot>();
     const tmpCol = new THREE.Color();
     const corners: [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 1]];
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const t = map.tiles[y * W + x];
+        const fam = matiere(t);
+        let lot = lots.get(fam);
+        if (!lot) { lot = { pos: [], col: [], uv: [], idx: [] }; lots.set(fam, lot); }
+        const v = lot.pos.length / 3;
         // Seule l'eau descend : décaler les chemins créerait une fissure visible avec leurs voisins.
         const flatY = t === T.EAU ? -.86 : null;   // lit du plan d'eau, bien en dessous
-        const base = v * 3;
-        corners.forEach(([cx, cy], i) => {
+        for (const [cx, cy] of corners) {
           const co = ((y + cy) * CW + (x + cx));
-          pos[base + i * 3] = x - .5 + cx;
-          pos[base + i * 3 + 1] = flatY ?? corner[co];
-          pos[base + i * 3 + 2] = y - .5 + cy;
+          lot.pos.push(x - .5 + cx, flatY ?? corner[co], y - .5 + cy);
+          lot.uv.push(x - .5 + cx, -(y - .5 + cy));
           blended(x, y, cx, cy, tmpCol);
-          col[base + i * 3] = tmpCol.r; col[base + i * 3 + 1] = tmpCol.g; col[base + i * 3 + 2] = tmpCol.b;
-        });
-        idx[f] = v; idx[f + 1] = v + 2; idx[f + 2] = v + 1;
-        idx[f + 3] = v; idx[f + 4] = v + 3; idx[f + 5] = v + 2;
-        v += 4; f += 6;
+          lot.col.push(tmpCol.r, tmpCol.g, tmpCol.b);
+        }
+        lot.idx.push(v, v + 2, v + 1, v, v + 3, v + 2);
       }
     }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geo.setIndex(new THREE.BufferAttribute(idx, 1));
-    geo.computeVertexNormals();
-    const ground = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGradient() }));
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+
+    for (const [fam, lot] of lots) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(lot.pos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(lot.col, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(lot.uv, 2));
+      geo.setIndex(lot.idx);
+      geo.computeVertexNormals();
+      const tex = tileTexture(fam);
+      const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGradient() });
+      // Le motif est en niveaux de gris proches du blanc : il assombrit le détail
+      // sans toucher à la teinte, quel que soit le biome.
+      if (tex) mat.map = tex;
+      const ground = new THREE.Mesh(geo, mat);
+      ground.receiveShadow = true;
+      this.scene.add(ground);
+    }
 
     // Terrain de remplissage au-delà des bords, affleurant le sol.
     const pad = map.biome === 'interieur' ? 8 : 60;
@@ -571,8 +591,16 @@ export class Overworld {
     const mur = tiles[T.MUR] ?? [];
     if (mur.length) {
       const wallCol = map.indoor ? 0xb9c3d4 : 0xe2d6bf;
-      const im = inst(new THREE.BoxGeometry(1, 2.2, 1), toon(wallCol), mur.length);
-      const roof = inst(new THREE.BoxGeometry(1.1, .42, 1.1), toon(map.indoor ? (map.accent ?? 0x6b5240) : 0xc4564e), mur.length);
+      // Bardage et tuiles : le nombre de répétitions suit les dimensions du volume,
+      // sinon le motif s'étire sur les faces hautes.
+      const wallMat = toon(wallCol);
+      const wallTex = tileTexture('mur', 1, 2.2);
+      if (wallTex) wallMat.map = wallTex;
+      const roofMat = toon(map.indoor ? (map.accent ?? 0x6b5240) : 0xc4564e);
+      const roofTex = tileTexture('toit');
+      if (roofTex) roofMat.map = roofTex;
+      const im = inst(new THREE.BoxGeometry(1, 2.2, 1), wallMat, mur.length);
+      const roof = inst(new THREE.BoxGeometry(1.1, .42, 1.1), roofMat, mur.length);
       const trim = inst(new THREE.BoxGeometry(1.14, .12, 1.14), toon(map.indoor ? 0x7f8ba0 : 0x9c3f3a), mur.length);
       const plinth = map.indoor ? inst(new THREE.BoxGeometry(1.04, .28, 1.04), toon(0x8a94a8), mur.length) : null;
       // Façades sud : on pose une fenêtre sur les murs qui donnent sur l'extérieur.

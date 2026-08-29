@@ -34,6 +34,9 @@ await page.click('[data-act="new"]');
 await page.waitForTimeout(400);
 const yesOverwrite = page.locator('#dlg-choices .btn').first();
 if (await yesOverwrite.count()) { await yesOverwrite.click(); await page.waitForTimeout(300); }
+// choix du sexe, désormais demandé avant le nom
+await page.locator('#overlay button.card').first().click();
+await page.waitForTimeout(400);
 await page.fill('#overlay input', 'Duel');
 await page.click('#overlay .btn.primary');
 const advance = async (n = 12) => {
