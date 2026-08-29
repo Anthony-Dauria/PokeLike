@@ -49,7 +49,10 @@ public/sprites/index.json      → { "dex": [1, 2, 3, …] }  (facultatif mais c
   reste petite, une grande remplit sa plateforme, et les pieds touchent le sol.
   Le cadrage se recalcule tout seul quand l'écran change de taille ou d'orientation.
 - `index.json` évite des requêtes inutiles ; sans lui, trois échecs d'affilée
-  suffisent à conclure qu'aucun pack n'est installé.
+  suffisent à conclure qu'aucun pack n'est installé. Il recense les vues de face
+  dans `dex` et celles de dos dans `back` : sans cette seconde liste, le jeu
+  demande un fichier de dos pour chaque espèce, y compris celles qui n'en ont
+  pas. `npm run sprites` l'écrit tout seul.
 - Le chargement est paresseux : seule une espèce réellement rencontrée est demandée,
   une seule fois par session.
 - Les numéros correspondent au Pokédex national (voir `src/data/pokedex.gen.ts`).
