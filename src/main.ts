@@ -584,6 +584,35 @@ class Game {
   debugStyle(st: 'ds' | 'lisse') { state.style = st; this.applyQuality(); }
   debugCreatures(m: 'sprites' | '3d') { state.creatures = m; this.applyQuality(); }
   debugSpriteSource() { return { foe: this.battleScene.spriteSource('foe'), mine: this.battleScene.spriteSource('mine') }; }
+  /**
+   * Où se retrouve, à l'écran, le haut de l'image d'un pack. Le repère cherché est
+   * le pixel très clair que le pack de test dessine en haut de la planche : s'il
+   * ressort en bas, la texture est retournée. Vérifie le résultat final, pas la
+   * façon dont on y arrive (retournement fait par nous ou par WebGL).
+   */
+  debugPackOrientation(who: 'mine' | 'foe' = 'foe'): string {
+    const tex = this.battleScene.spriteTexture(who);
+    if (!tex || tex.userData.src !== 'pack') return 'aucun pack';
+    const img = tex.image as ImageBitmap | undefined;
+    if (!img?.width) return 'image absente';
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return 'canvas indisponible';
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, img.width, img.height).data;
+    let somme = 0, n = 0;
+    for (let y = 0; y < img.height; y++) {
+      for (let x = 0; x < img.width; x++) {
+        const i = (y * img.width + x) * 4;
+        if (d[i + 3] > 200 && d[i] > 230 && d[i + 1] > 230 && d[i + 2] > 230) { somme += y; n++; }
+      }
+    }
+    if (!n) return 'repère absent';
+    // Sans retournement par WebGL, la ligne 0 de l'image se retrouve en bas du panneau.
+    const hautEcran = tex.flipY ? somme / n < img.height / 2 : somme / n > img.height / 2;
+    return hautEcran ? 'haut' : 'bas';
+  }
   debugShadows() { return this.renderer.gl.shadowMap.enabled; }
   debugPerf() {
     const i = this.renderer.gl.info;

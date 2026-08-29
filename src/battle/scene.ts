@@ -538,12 +538,16 @@ export class BattleScene {
     }
   }
 
-  /** D'où vient la texture affichée : pack du joueur ou cuisson du modèle. */
-  spriteSource(who: 'mine' | 'foe'): string {
+  /** Texture affichée pour un combattant, quelle qu'en soit l'origine. */
+  spriteTexture(who: 'mine' | 'foe'): THREE.Texture | null {
     const rig = who === 'mine' ? this.mineRig : this.foeRig;
     const mesh = rig?.group.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
-    const mat = mesh?.material as THREE.MeshBasicMaterial | undefined;
-    return (mat?.map?.userData.src as string) ?? '3d';
+    return (mesh?.material as THREE.MeshBasicMaterial | undefined)?.map ?? null;
+  }
+
+  /** D'où vient la texture affichée : pack du joueur ou cuisson du modèle. */
+  spriteSource(who: 'mine' | 'foe'): string {
+    return (this.spriteTexture(who)?.userData.src as string) ?? '3d';
   }
 
   hideFoe() { if (this.foeRig) this.foeRig.group.visible = false; }

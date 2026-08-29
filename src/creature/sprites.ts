@@ -36,19 +36,31 @@ function ctx2d(w: number, h: number) {
   } catch { return null; }
 }
 
+/** Image de pack décodée : bitmap prêt à téléverser + mesures du sujet. */
+interface Prepared { bmp: ImageBitmap; aspect: number; px: number; frame: number; flipped: boolean }
+
 /**
- * Recadre une image sur ses pixels opaques. Les packs cadrent en général dans un
- * carré fixe avec beaucoup de vide autour : sans ce rognage, une petite espèce
- * flotte au-dessus de la plateforme et paraît deux fois trop petite.
+ * Recadre une image sur ses pixels opaques, puis la retourne verticalement.
+ *
+ * Le rognage : les packs cadrent dans un carré fixe avec beaucoup de vide autour ;
+ * sans lui, une petite espèce flotte au-dessus de la plateforme.
+ *
+ * Le retournement : WebGL prend l'origine des textures en bas à gauche, alors que
+ * les images vont de haut en bas. three.js corrige avec `UNPACK_FLIP_Y_WEBGL`, mais
+ * ce réglage est ignoré pour les `ImageBitmap` sur WebKit — les sprites s'affichaient
+ * à l'endroit sur Chrome et la tête en bas sur iPhone. En retournant nous-mêmes au
+ * moment du décodage, l'orientation ne dépend plus du navigateur (`flipped` dit
+ * alors à l'appelant de laisser `flipY` à faux).
  */
-async function trimAlpha(bmp: ImageBitmap): Promise<{ bmp: ImageBitmap; aspect: number; px: number; frame: number }> {
-  const frame = bmp.height || FRAME_REF;
-  const plein = { bmp, aspect: bmp.width / bmp.height || 1, px: FRAME_REF, frame };
-  const ctx = ctx2d(bmp.width, bmp.height);
-  if (!ctx) return plein;
+async function prepare(src: ImageBitmap): Promise<Prepared> {
+  const frame = src.height || FRAME_REF;
+  // Repli si le canvas 2D n'est pas disponible : image brute, retournée par three.js.
+  const brut: Prepared = { bmp: src, aspect: src.width / src.height || 1, px: FRAME_REF, frame, flipped: false };
+  const ctx = ctx2d(src.width, src.height);
+  if (!ctx) return brut;
   try {
-    ctx.drawImage(bmp, 0, 0);
-    const { data, width: w, height: h } = ctx.getImageData(0, 0, bmp.width, bmp.height);
+    ctx.drawImage(src, 0, 0);
+    const { data, width: w, height: h } = ctx.getImageData(0, 0, src.width, src.height);
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -59,13 +71,18 @@ async function trimAlpha(bmp: ImageBitmap): Promise<{ bmp: ImageBitmap; aspect: 
         if (y > y1) y1 = y;
       }
     }
-    if (x1 < x0 || y1 < y0) return plein;                       // image entièrement vide
+    if (x1 < x0 || y1 < y0) return brut;                        // image entièrement vide
     const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
-    if (cw === w && ch === h) return plein;                     // déjà au plus juste
-    const cut = await createImageBitmap(bmp, x0, y0, cw, ch);
-    bmp.close();
-    return { bmp: cut, aspect: cw / ch, px: (ch / frame) * FRAME_REF, frame };
-  } catch { return plein; }                                     // canvas indisponible ou souillé
+    // Recadrage et retournement en une seule passe.
+    const dst = ctx2d(cw, ch);
+    if (!dst) return brut;
+    dst.translate(0, ch);
+    dst.scale(1, -1);
+    dst.drawImage(src, x0, y0, cw, ch, 0, 0, cw, ch);
+    const bmp = await createImageBitmap(dst.canvas);
+    src.close();
+    return { bmp, aspect: cw / ch, px: (ch / frame) * FRAME_REF, frame, flipped: true };
+  } catch { return brut; }                                      // canvas indisponible ou souillé
 }
 
 /**
@@ -215,9 +232,11 @@ export class CreatureSprites {
           if (!listed && ++this.misses >= 3) this.packOff = true;
           continue;
         }
-        const { bmp, aspect, px, frame } = await trimAlpha(await createImageBitmap(await res.blob()));
+        const { bmp, aspect, px, frame, flipped } = await prepare(await createImageBitmap(await res.blob()));
         const tex = new THREE.Texture(bmp);
         tex.colorSpace = THREE.SRGBColorSpace;
+        // Déjà retournée au décodage : three.js ne doit pas la retourner une seconde fois.
+        tex.flipY = !flipped;
         // Une planche haute définition est réduite à l'écran : sans filtrage ni
         // mipmaps elle scintillerait. Les planches façon DS restent au plus proche.
         const gros = frame > FRAME_REF * 1.5;

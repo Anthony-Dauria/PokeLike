@@ -39,9 +39,11 @@ async function run(label) {
   await page.evaluate(() => window.pokelike.debugWild('pidgey', 12));
   await page.waitForTimeout(2600);
   const src = await page.evaluate(() => window.pokelike.debugSpriteSource());
+  // Orientation : le repère clair du pack factice doit ressortir en haut de l'écran.
+  const sens = await page.evaluate(() => window.pokelike.debugPackOrientation('foe'));
   await page.screenshot({ path: `${OUT}/50-sprites-${label}.png` });
   await page.close();
-  return { src, errors };
+  return { src, sens, errors };
 }
 
 // 1. sans pack
@@ -53,7 +55,7 @@ console.log('sans pack   →', JSON.stringify(sans.src), sans.errors.length ? 'E
 execFileSync(process.execPath, ['scripts/gen-test-sprites.mjs'], { stdio: 'inherit' });
 await cp('public/sprites', 'dist/sprites', { recursive: true });
 const avec = await run('avec-pack');
-console.log('avec pack   →', JSON.stringify(avec.src), avec.errors.length ? 'ERREURS: ' + avec.errors.join(' | ') : '');
+console.log('avec pack   →', JSON.stringify(avec.src), 'orientation:', avec.sens, avec.errors.length ? 'ERREURS: ' + avec.errors.join(' | ') : '');
 
 // ménage : on ne laisse traîner aucun pack
 await rm('dist/sprites', { recursive: true, force: true });
@@ -62,8 +64,9 @@ await rm('public/sprites/back', { recursive: true, force: true });
 
 const ok = sans.src.foe === 'bake' && sans.src.mine === 'bake'
   && avec.src.foe === 'pack' && avec.src.mine === 'pack'
+  && avec.sens === 'haut'
   && !sans.errors.length && !avec.errors.length;
-if (!ok) console.log('attendu : sans={bake,bake} avec={pack,pack}');
+if (!ok) console.log(`attendu : sans={bake,bake} avec={pack,pack} orientation=haut (obtenu ${avec.sens})`);
 console.log(ok ? 'SPRITES OK — cuisson et pack tous deux utilisés' : 'SPRITES ÉCHEC');
 await browser.close();
 server.close();
