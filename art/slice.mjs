@@ -29,8 +29,14 @@ const sorties = await page.evaluate(async ({ b64, spec }) => {
   const img = sx.getImageData(0, 0, W, H);
   const d = img.data;
 
-  // --- fond : remplissage depuis les bords sur les pixels quasi blancs ---
-  const blanc = (p) => d[p] > 240 && d[p + 1] > 240 && d[p + 2] > 240;
+  // --- fond : remplissage depuis les bords ---
+  // Les planches sur fond blanc et celles sur fond sombre partagent la même
+  // logique ; seul le test « est-ce du fond » change.
+  const sombre = !!spec.dark;
+  const seuil = spec.bgSeuil ?? (sombre ? 62 : 240);
+  const blanc = (p) => sombre
+    ? (d[p] + d[p + 1] + d[p + 2]) / 3 < seuil
+    : d[p] > seuil && d[p + 1] > seuil && d[p + 2] > seuil;
   const fond = new Uint8Array(W * H);
   const pile = new Int32Array(W * H);
   let sp = 0;
@@ -54,7 +60,7 @@ const sorties = await page.evaluate(async ({ b64, spec }) => {
   // il dessine un halo blanc autour de chaque sprite une fois en jeu. On absorbe
   // donc dans le fond les pixels clairs et gris qui le touchent, sur deux passes :
   // assez pour le liseré, trop peu pour entamer une surface blanche du dessin.
-  for (let passe = 0; passe < 2; passe++) {
+  for (let passe = 0; passe < (sombre ? 0 : 2); passe++) {
     const ajout = [];
     for (let y = 1; y < H - 1; y++) {
       for (let x = 1; x < W - 1; x++) {

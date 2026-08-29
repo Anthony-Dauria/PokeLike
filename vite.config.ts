@@ -23,7 +23,9 @@ export default defineConfig({
         runtimeCaching: [{
           // Chaque sprite réellement affiché est gardé : la partie reste jouable
           // hors ligne, sprites compris, une fois les espèces rencontrées.
-          urlPattern: ({ url }) => url.pathname.includes('/sprites/'),
+          // Les scènes de pièces (public/monde/scenes) pèsent trop pour le pré-cache :
+          // elles sont gardées à la première visite, comme les packs de sprites.
+          urlPattern: ({ url }) => url.pathname.includes('/sprites/') || url.pathname.includes('/monde/scenes/'),
           handler: 'CacheFirst',
           options: {
             cacheName: 'pokelike-sprites',
