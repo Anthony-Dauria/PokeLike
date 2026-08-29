@@ -24,7 +24,32 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+
+      # Pack de sprites facultatif. L'adresse n'est pas dans le dépôt : définissez
+      # la variable SPRITE_SOURCE (Settings → Secrets and variables → Actions →
+      # Variables) pour que le site publié utilise vos images. Sans elle, le jeu
+      # affiche ses créatures procédurales.
+      - name: Pack de sprites (si SPRITE_SOURCE est défini)
+        env:
+          FROM: ${{ vars.SPRITE_SOURCE }}
+          BACK: ${{ vars.SPRITE_SOURCE_BACK }}
+        run: |
+          if [ -z "$FROM" ]; then
+            echo "SPRITE_SOURCE non défini — créatures procédurales."
+            exit 0
+          fi
+          if [ -n "$BACK" ]; then
+            npm run sprites -- --from "$FROM" --back "$BACK"
+          else
+            npm run sprites -- --from "$FROM"
+          fi
+
       - run: npm run build
+
+      # enablement: active Pages tout seul si ce n'est pas déjà fait.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
