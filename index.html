@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>PokeLike — Aventure Valmore</title>
+<meta name="description" content="RPG de monstres en 3D : 8 arènes, une Ligue, et un post-game complet." />
+<meta name="theme-color" content="#0d1b2a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="PokeLike" />
+<link rel="icon" href="./icons/favicon.png" />
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene"></canvas>
+    <div id="vignette" aria-hidden="true"></div>
+
+    <!-- Écran titre -->
+    <div id="title" class="screen">
+      <div class="title-art">
+        <h1>Poke<span>Like</span></h1>
+        <p class="tag">Aventure Valmore &amp; Orsyn</p>
+      </div>
+      <div class="title-menu">
+        <button class="btn big" data-act="continue" hidden>Continuer</button>
+        <button class="btn big primary" data-act="new">Nouvelle partie</button>
+        <button class="btn" data-act="install" hidden>📲 Installer l'appli</button>
+      </div>
+      <p class="hint" id="title-hint"></p>
+    </div>
+
+    <!-- HUD overworld -->
+    <div id="hud" hidden>
+      <div id="loc-banner"><span></span></div>
+      <button id="menu-btn" class="round-btn" aria-label="Menu">☰</button>
+      <div id="stick" aria-hidden="true"><div id="stick-knob"></div></div>
+      <div id="action-pad">
+        <button id="btn-b" class="round-btn big-btn" aria-label="Annuler">B</button>
+        <button id="btn-a" class="round-btn big-btn primary" aria-label="Action">A</button>
+      </div>
+    </div>
+
+    <!-- Boîte de dialogue -->
+    <div id="dialogue" hidden>
+      <div class="box">
+        <p id="dlg-text"></p>
+        <div id="dlg-choices"></div>
+        <span id="dlg-next">▼</span>
+      </div>
+    </div>
+
+    <!-- Menus plein écran -->
+    <div id="overlay" hidden></div>
+
+    <!-- Interface de combat -->
+    <div id="battle-ui" hidden>
+      <div class="bt-bars">
+        <div class="bt-bar foe">
+          <div class="nm"><b data-f="name"></b><span data-f="lvl"></span></div>
+          <div class="hpbar"><i data-f="hp"></i></div>
+          <div class="status" data-f="st"></div>
+        </div>
+        <div class="bt-bar mine">
+          <div class="nm"><b data-f="name"></b><span data-f="lvl"></span></div>
+          <div class="hpbar"><i data-f="hp"></i></div>
+          <div class="hpnum" data-f="hpnum"></div>
+          <div class="xpbar"><i data-f="xp"></i></div>
+          <div class="status" data-f="st"></div>
+        </div>
+      </div>
+      <div id="bt-log"><p></p></div>
+      <div id="bt-menu"></div>
+    </div>
+
+    <div id="fade"></div>
+    <div id="toast"></div>
+  </div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
