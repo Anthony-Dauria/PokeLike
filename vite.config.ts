@@ -14,7 +14,7 @@ export default defineConfig({
         // qu'au fil des rencontres.
         // Les dessins de Valmore font partie du jeu, comme les icônes : ils sont
         // pré-cachés pour qu'une première partie hors ligne montre les starters.
-        globPatterns: ['**/*.{js,css,html,svg,woff2}', 'icons/*.png', 'valmore/*.png', 'monde/*.png'],
+        globPatterns: ['**/*.{js,css,html,svg,woff2}', 'icons/*.png', 'valmore/*.png', 'monde/*.png', 'monde/sols/*.png', 'monde/props/*.png'],
         globIgnores: ['**/sprites/**'],
 
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,

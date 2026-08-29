@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { T, WALKABLE, type Ent, type GameMap } from './mapgen';
-import { tileTexture, type TileFamily } from './tiletex';
+import { drawnTile, tileTexture, type TileFamily } from './tiletex';
 import { billboardGeometry, sprite2d, spriteMaterial, TILT } from './sprites2d';
 import { state } from '../game/state';
 import { animateRig, buildHuman, type CreatureRig } from '../creature/model';
@@ -128,6 +128,8 @@ export class Overworld {
   private grassDist = 0;
   /** Case occupée à la frame précédente : portes et sorties ne se déclenchent qu'au changement. */
   private lastTile = -1;
+  /** Cases prises par du mobilier posé au décor : infranchissables, sans toucher à la carte. */
+  private meubles = new Set<number>();
   private player!: CreatureRig;
   private actors: ActorView[] = [];
   private removed = new Set<string>();
@@ -161,6 +163,7 @@ export class Overworld {
     addSky(this.scene, pal.skyTop, pal.skyMid, pal.skyLow, map.indoor ? 0.1 : 0.5);
     this.lights = addLights(this.scene, pal.light ?? pal.skyMid, pal.ground, map.indoor ? 0xffeacb : 0xfff6e0, this.shadows);
 
+    this.meubles.clear();
     this.buildTerrain(map, pal);
     this.buildProps(map, pal);
     if (!map.indoor) this.buildHorizon(map, pal);
@@ -279,6 +282,7 @@ export class Overworld {
                 // T.HERBE désigne les hautes herbes, pas le sol ordinaire.
                 : map.indoor ? 'sol' : 'herbe';
 
+    const dessins = SOLS_DESSINES[map.biome] ?? {};
     interface Lot { pos: number[]; col: number[]; uv: number[]; idx: number[] }
     const lots = new Map<TileFamily, Lot>();
     const tmpCol = new THREE.Color();
@@ -292,12 +296,28 @@ export class Overworld {
         const v = lot.pos.length / 3;
         // Seule l'eau descend : décaler les chemins créerait une fissure visible avec leurs voisins.
         const flatY = t === T.EAU ? -.86 : null;   // lit du plan d'eau, bien en dessous
+        // Un sol dessiné est une tuile complète : on lui donne des UV de 0 à 1 sur
+        // la case, retournées au hasard pour que la répétition ne saute pas aux
+        // yeux. Un motif procédural, lui, se raccorde d'une case à l'autre et
+        // suit donc les coordonnées du monde.
+        const dessine = !!dessins[fam];
+        const fx = dessine && ((x * 73 + y * 31) & 1) ? 1 : 0;
+        const fy = dessine && ((x * 17 + y * 91) & 2) ? 1 : 0;
+        const gris = dessine ? ao(x, y) : 0;
         for (const [cx, cy] of corners) {
           const co = ((y + cy) * CW + (x + cx));
           lot.pos.push(x - .5 + cx, flatY ?? corner[co], y - .5 + cy);
-          lot.uv.push(x - .5 + cx, -(y - .5 + cy));
-          blended(x, y, cx, cy, tmpCol);
-          lot.col.push(tmpCol.r, tmpCol.g, tmpCol.b);
+          if (dessine) {
+            // Léger rognage : le carré source a ses propres bords assombris, qui
+            // dessineraient une grille à chaque jointure de cases.
+            const u = INSET + cx * (1 - 2 * INSET), v = INSET + cy * (1 - 2 * INSET);
+            lot.uv.push(fx ? 1 - u : u, fy ? v : 1 - v);
+            lot.col.push(gris, gris, gris);
+          } else {
+            lot.uv.push(x - .5 + cx, -(y - .5 + cy));
+            blended(x, y, cx, cy, tmpCol);
+            lot.col.push(tmpCol.r, tmpCol.g, tmpCol.b);
+          }
         }
         lot.idx.push(v, v + 2, v + 1, v, v + 3, v + 2);
       }
@@ -310,10 +330,11 @@ export class Overworld {
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(lot.uv, 2));
       geo.setIndex(lot.idx);
       geo.computeVertexNormals();
-      const tex = tileTexture(fam);
+      const dessin = dessins[fam];
+      const tex = dessin ? drawnTile(dessin) : tileTexture(fam);
       const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGradient() });
-      // Le motif est en niveaux de gris proches du blanc : il assombrit le détail
-      // sans toucher à la teinte, quel que soit le biome.
+      // Motif procédural : niveaux de gris proches du blanc, il assombrit le
+      // détail sans toucher à la teinte. Sol dessiné : il porte déjà sa couleur.
       if (tex) mat.map = tex;
       const ground = new THREE.Mesh(geo, mat);
       ground.receiveShadow = true;
@@ -686,6 +707,9 @@ export class Overworld {
       im.instanceMatrix.needsUpdate = true; top.instanceMatrix.needsUpdate = true;
     }
 
+    /* -- mobilier dessiné, le long du mur du fond des intérieurs -- */
+    if (map.indoor) this.meublerInterieur(map, rng);
+
     /* -- portes & sorties -- */
     for (const e of map.ents) {
       if (e.kind === 'door') {
@@ -909,6 +933,49 @@ export class Overworld {
     return true;
   }
 
+  /**
+   * Garnit le mur du fond d'un intérieur avec du mobilier dessiné. Les pièces
+   * restent générées : on ne fait qu'habiller la première rangée libre, celle qui
+   * longe le mur, en laissant partout ailleurs le passage.
+   *
+   * Les cases occupées deviennent infranchissables par `meubles`, sans modifier
+   * la carte elle-même : elle est partagée et servirait telle quelle au retour.
+   */
+  private meublerInterieur(map: GameMap, rng: RNG) {
+    // Les noms portent leur sous-dossier : sprite2d lit public/monde/<nom>.png.
+    const choix = ['props/casier', 'props/machine', 'props/etagere', 'props/distributeur',
+      'props/plante', 'props/plante-2', 'props/caisses'];
+    if (!choix.every((n) => sprite2d(n).ready)) { for (const n of choix) sprite2d(n, () => {}); return; }
+
+    // Cases longeant un mur : la rangée du fond, puis les deux murs latéraux. Le
+    // fond est souvent pris par le comptoir, les côtés restent visibles et libres.
+    const cases: [number, number][] = [];
+    for (let x = 1; x < map.w - 1; x++) cases.push([x, 2]);
+    for (let y = 3; y < map.h - 2; y++) { cases.push([1, y]); cases.push([map.w - 2, y]); }
+
+    const pris: { nom: string; x: number; y: number }[] = [];
+    for (const [x, y] of cases) {
+      const t = map.tiles[y * map.w + x];
+      if (!WALKABLE.has(t) || t === T.PORTE || t === T.COMPTOIR) continue;
+      // On laisse libres les abords d'une entité : comptoir, PNJ, escalier, objet.
+      if (map.ents.some((e) => Math.abs(e.x - x) <= 1 && Math.abs(e.y - y) <= 1)) continue;
+      // Pas deux meubles côte à côte, pour ne pas murer un passage.
+      if (pris.some((p) => Math.abs(p.x - x) + Math.abs(p.y - y) <= 1)) continue;
+      if (!rng.chance(.5)) continue;
+      pris.push({ nom: choix[rng.int(choix.length)], x, y });
+    }
+    for (const { nom, x, y } of pris) {
+      const s = sprite2d(nom);
+      const mesh = new THREE.Mesh(billboardGeometry(), spriteMaterial(s));
+      const h = 1.15;
+      mesh.position.set(x, 0, y + .1);
+      mesh.rotation.x = TILT;
+      mesh.scale.set(h * (s.aspect || 1), h, 1);
+      this.scene.add(mesh);
+      this.meubles.add(y * map.w + x);
+    }
+  }
+
   /** Pose le panneau d'un bâtiment sur l'emprise donnée. */
   private addBatiment(nom: string, x0: number, _y0: number, x1: number, y1: number) {
     const s = sprite2d(nom);
@@ -941,6 +1008,7 @@ export class Overworld {
 
   private blocked(x: number, y: number): boolean {
     if (!WALKABLE.has(this.tileAt(x, y))) return true;
+    if (this.meubles.has(y * this.map.w + x)) return true;
     const e = this.entAt(x, y);
     return !!e && e.kind !== 'exit';
   }
@@ -1180,6 +1248,23 @@ export class Overworld {
     }
   }
 }
+
+/** Part rognée de chaque bord d'un sol dessiné, pour masquer sa bordure propre. */
+const INSET = .045;
+
+/**
+ * Sols dessinés selon le biome. Là où une image existe, elle remplace le motif
+ * procédural : elle apporte sa propre couleur, donc la teinte de palette est
+ * abandonnée pour cette matière et seule l'occlusion module encore la surface.
+ * Les biomes absents gardent les motifs en niveaux de gris, qui eux se teintent.
+ */
+const SOLS_DESSINES: Record<string, Partial<Record<TileFamily, string>>> = {
+  grotte: { sol: 'roche-brune', herbe: 'roche-brune', chemin: 'roche-brune', roche: 'brique-grise' },
+  volcan: { herbe: 'roche-brune', sol: 'roche-brune', chemin: 'roche-brune', eau: 'lave', roche: 'brique-grise' },
+  // Ni « neige » ni « interieur » : la glace bleue transforme une route enneigée en
+  // lac, et aucun de ces sols n'est un carrelage de bâtiment. Le motif procédural
+  // garde l'avantage de prendre la couleur du biome ou du lieu.
+};
 
 /** Quel dessin de bâtiment employer pour une porte donnée. */
 function nomBatiment(to: string, label: string): string {

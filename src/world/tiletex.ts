@@ -161,6 +161,37 @@ const PEINTRES: Record<TileFamily, (ctx: CanvasRenderingContext2D, rng: RNG) => 
   eau: (ctx) => eau(ctx),
 };
 
+/* -------------------- sols dessinés -------------------- */
+
+const dessins = new Map<string, THREE.Texture>();
+const chargeur = new THREE.TextureLoader();
+
+/**
+ * Sol dessiné, chargé depuis `public/monde/sols/`. Contrairement aux motifs
+ * procéduraux, il porte sa propre couleur : l'appelant ne doit donc pas le
+ * teinter par la palette du biome, sous peine de doubler la couleur.
+ *
+ * La texture est remplie sur place au chargement plutôt que remplacée, pour que
+ * les matériaux créés avant l'arrivée de l'image la voient apparaître.
+ */
+export function drawnTile(name: string): THREE.Texture {
+  let t = dessins.get(name);
+  if (t) return t;
+  t = new THREE.Texture();
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  dessins.set(name, t);
+  const cible = t;
+  chargeur.load(`./monde/sols/${name}.png`, (src) => {
+    cible.image = src.image;
+    cible.colorSpace = THREE.SRGBColorSpace;
+    cible.magFilter = THREE.LinearFilter;
+    cible.minFilter = THREE.LinearMipmapLinearFilter;
+    cible.generateMipmaps = true;
+    cible.needsUpdate = true;
+  });
+  return t;
+}
+
 const cache = new Map<string, THREE.Texture | null>();
 
 /**
