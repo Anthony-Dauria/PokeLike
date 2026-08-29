@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { T, WALKABLE, type Ent, type GameMap } from './mapgen';
+import { state } from '../game/state';
 import { animateRig, buildHuman, type CreatureRig } from '../creature/model';
 import { RNG, hashStr } from '../engine/rng';
 import { addLights, addSky, disposeObject, disposeScene, toonGradient, uTime, windify, type SceneLights } from '../engine/renderer';
@@ -104,15 +105,27 @@ function valueNoise(x: number, y: number, seed: number): number {
   return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
 }
 
+/** Rayon de collision du joueur, en cases : assez fin pour passer un couloir d'une case. */
+const RADIUS = .34;
+/** Vitesse de marche et de course, en cases par seconde. */
+const SPEED = 4.0, SPEED_RUN = 6.4;
+/** En dessous, on considère le stick au repos. */
+const DEADZONE = .12;
+
 export class Overworld {
   scene = new THREE.Scene();
   map!: GameMap;
   px = 0; py = 0;
   facing = 0;
-  private moving = false;
-  private moveT = 0;
-  private moveDur = .21;
-  private fromX = 0; private fromY = 0; private toX = 0; private toY = 0;
+  /** Orientation continue, en radians, dans la convention de `faceAngle`. */
+  heading = 0;
+  private walking = false;
+  /** Distance parcourue depuis le dernier « pas » compté. */
+  private stepDist = 0;
+  /** Distance parcourue dans les hautes herbes depuis le dernier tirage. */
+  private grassDist = 0;
+  /** Case occupée à la frame précédente : portes et sorties ne se déclenchent qu'au changement. */
+  private lastTile = -1;
   private player!: CreatureRig;
   private actors: ActorView[] = [];
   private removed = new Set<string>();
@@ -130,7 +143,7 @@ export class Overworld {
     this.hooks = hooks;
   }
 
-  get busy() { return this.moving; }
+  get busy() { return false; }
 
   /** Reconstruit entièrement la scène pour une carte. */
   load(map: GameMap, spawn: [number, number], facing = 0, hidden: Set<string> = new Set(), beaten: Set<string> = new Set()) {
@@ -152,11 +165,16 @@ export class Overworld {
     if (pal.clouds && !map.indoor) this.buildClouds(map, pal);
     this.buildActors(map);
 
-    this.player = buildHuman(0x2a7fd4, 0xf2c9a0, 0x2b1d16, 0xe8434e);
+    // Apparence du joueur selon le sexe choisi au début de la partie.
+    this.player = state.gender === 'f'
+      ? buildHuman(0xe0518a, 0xf2c9a0, 0x8a4326, 0xf6f8fc, true)
+      : buildHuman(0x2a7fd4, 0xf2c9a0, 0x2b1d16, 0xe8434e);
     this.scene.add(this.player.group);
     this.px = spawn[0]; this.py = spawn[1];
-    this.facing = facing;
-    this.moving = false;
+    this.setFacing(facing);
+    this.nudgeIntoPlace();
+    this.lastTile = this.tileIndex(this.px, this.py);
+    this.stepDist = this.grassDist = 0;
     this.syncPlayer();
     this.camTarget.set(this.px, 0, this.py);
   }
@@ -790,6 +808,42 @@ export class Overworld {
     return !!e && e.kind !== 'exit';
   }
 
+  /**
+   * Décale le joueur si son cercle mord un obstacle. Les points d'apparition sont
+   * donnés à la case ; avec un rayon, un angle de mur peut les rendre invalides.
+   */
+  private nudgeIntoPlace() {
+    if (this.fits(this.px, this.py)) return;
+    for (const r of [.25, .5]) {
+      for (const [ox, oy] of [[0, -r], [0, r], [-r, 0], [r, 0], [-r, -r], [r, -r], [-r, r], [r, r]]) {
+        if (this.fits(this.px + ox, this.py + oy)) { this.px += ox; this.py += oy; return; }
+      }
+    }
+  }
+
+  /** Index de la case sous une position continue. */
+  private tileIndex(x: number, y: number): number {
+    return Math.round(y) * this.map.w + Math.round(x);
+  }
+
+  /**
+   * Le joueur tient-il à cette position ? On teste les quatre coins de son cercle :
+   * en déplacement libre, il faut empêcher de traverser un angle de mur en biais.
+   */
+  private fits(x: number, y: number): boolean {
+    for (const ox of [-RADIUS, RADIUS]) {
+      for (const oy of [-RADIUS, RADIUS]) {
+        if (this.blocked(Math.round(x + ox), Math.round(y + oy))) return false;
+      }
+    }
+    return true;
+  }
+
+  /** Vecteur unitaire de l'orientation courante (x = est, y = sud). */
+  private aim(): [number, number] {
+    return [-Math.sin(this.heading), Math.cos(this.heading)];
+  }
+
   removeEnt(key: string) {
     this.removed.add(key);
     const i = this.actors.findIndex((a) => entKey(this.map, a.ent) === key);
@@ -803,17 +857,31 @@ export class Overworld {
   }
 
   facingTile(): [number, number] {
-    const [dx, dy] = DIRV[this.facing];
-    return [this.px + dx, this.py + dy];
+    const [dx, dy] = this.aim();
+    return [Math.round(this.px + dx * .85), Math.round(this.py + dy * .85)];
   }
 
-  /** Entité devant le joueur (interaction A). */
+  /**
+   * Entité devant le joueur (interaction A). En déplacement libre on ne peut plus
+   * exiger l'alignement parfait d'une grille : on prend l'entité la plus proche
+   * dans un cône devant soi, et on retombe sur la case visée pour les comptoirs.
+   */
   front(): Ent | undefined {
+    const [dx, dy] = this.aim();
+    let best: Ent | undefined, bestD = Infinity;
+    for (const a of this.actors) {
+      const e = a.ent;
+      if (e.kind === 'exit') continue;
+      const vx = e.x - this.px, vy = e.y - this.py;
+      const d = Math.hypot(vx, vy);
+      if (d > 1.8 || d < 1e-4) continue;
+      // cos > .45 ≈ un cône de ±63°, assez large pour rester agréable au pouce.
+      if ((vx * dx + vy * dy) / d < .45) continue;
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (best) return best;
     const [x, y] = this.facingTile();
-    const e = this.entAt(x, y);
-    if (e) return e;
-    const t = this.tileAt(x, y);
-    if (t === T.COMPTOIR) {
+    if (this.tileAt(x, y) === T.COMPTOIR) {
       const near = this.actors.find((a) => (a.ent.kind === 'heal' || a.ent.kind === 'shop') && Math.abs(a.ent.x - x) <= 2 && Math.abs(a.ent.y - y) <= 2);
       return near?.ent;
     }
@@ -822,23 +890,34 @@ export class Overworld {
 
   private syncPlayer() {
     this.player.group.position.set(this.px, 0, this.py);
-    this.player.group.rotation.y = faceAngle(this.facing);
+    this.player.group.rotation.y = this.heading;
   }
 
-  setFacing(f: number) { this.facing = f; this.player.group.rotation.y = faceAngle(f); }
+  /** Oriente le joueur depuis un indice de direction (0 sud, 1 ouest, 2 nord, 3 est). */
+  setFacing(f: number) {
+    this.facing = f;
+    this.heading = faceAngle(f);
+    if (this.player) this.player.group.rotation.y = this.heading;
+  }
 
-  /** Recule le joueur d'une case (sortie bloquée). */
+  /** Recule le joueur d'un pas (sortie bloquée). */
   pushBack() {
-    const [dx, dy] = DIRV[this.facing];
-    const nx = this.px - dx, ny = this.py - dy;
-    if (WALKABLE.has(this.tileAt(nx, ny))) { this.px = nx; this.py = ny; }
+    const [dx, dy] = this.aim();
+    for (const d of [.6, 1, 1.4]) {
+      const nx = this.px - dx * d, ny = this.py - dy * d;
+      if (this.fits(nx, ny)) { this.px = nx; this.py = ny; break; }
+    }
+    this.lastTile = this.tileIndex(this.px, this.py);
     this.player.group.position.set(this.px, 0, this.py);
   }
 
   /** Téléporte le joueur sur une case. */
   place(x: number, y: number, facing = this.facing) {
-    this.px = x; this.py = y; this.facing = facing;
-    this.moving = false;
+    this.px = x; this.py = y;
+    this.setFacing(facing);
+    // La case d'arrivée ne doit pas redéclencher la porte qu'on vient d'emprunter.
+    this.lastTile = this.tileIndex(x, y);
+    this.stepDist = this.grassDist = 0;
     this.syncPlayer();
     this.camTarget.set(x, 0, y);
   }
@@ -859,35 +938,9 @@ export class Overworld {
     const t = this.clock;
     uTime.value = t;
 
-    if (!this.paused) {
-      if (this.moving) {
-        this.moveT += dt / this.moveDur;
-        if (this.moveT >= 1) {
-          this.moveT = 1; this.moving = false;
-          this.px = this.toX; this.py = this.toY;
-          this.player.group.position.set(this.px, 0, this.py);
-          this.onArrive();
-        } else {
-          const k = this.moveT;
-          this.player.group.position.set(
-            this.fromX + (this.toX - this.fromX) * k, Math.sin(k * Math.PI) * .05,
-            this.fromY + (this.toY - this.fromY) * k,
-          );
-        }
-      } else if (Math.abs(dir.x) > .3 || Math.abs(dir.y) > .3) {
-        const f = Math.abs(dir.x) > Math.abs(dir.y) ? (dir.x < 0 ? 1 : 3) : (dir.y < 0 ? 2 : 0);
-        if (f !== this.facing) this.setFacing(f);
-        const [dx, dy] = DIRV[f];
-        const nx = this.px + dx, ny = this.py + dy;
-        if (!this.blocked(nx, ny)) {
-          this.moving = true; this.moveT = 0;
-          this.moveDur = run ? .13 : .2;
-          this.fromX = this.px; this.fromY = this.py; this.toX = nx; this.toY = ny;
-        }
-      }
-    }
+    if (!this.paused) this.walk(dt, dir, run);
 
-    animateRig(this.player, t, this.moving ? 1 : 0);
+    animateRig(this.player, t, this.walking ? 1 : 0);
     for (const a of this.actors) {
       if (a.ent.kind === 'npc' || a.ent.kind === 'trainer' || a.ent.kind === 'leader' || a.ent.kind === 'boss' || a.ent.kind === 'heal' || a.ent.kind === 'shop') animateRig(a.rig, t);
       else if (a.ent.kind === 'item') { a.rig.group.rotation.y = t * 1.4; a.rig.group.position.y = .38 + Math.sin(t * 2) * .08; }
@@ -915,20 +968,66 @@ export class Overworld {
     }
   }
 
-  private onArrive() {
-    this.hooks.onStep();
-    const t = this.tileAt(this.px, this.py);
-    const here = this.actors.find((a) => a.ent.x === this.px && a.ent.y === this.py);
-    const exitEnt = this.map.ents.find((e) => e.kind === 'exit' && e.x === this.px && e.y === this.py);
-    if (t === T.PORTE) {
-      const door = this.map.ents.find((e) => e.kind === 'door' && e.x === this.px && e.y === this.py);
-      if (door && door.kind === 'door') { this.hooks.onDoor(door.to); return; }
-      if (exitEnt && exitEnt.kind === 'exit') { this.hooks.onExit(exitEnt.to, exitEnt); return; }
-    }
-    if (exitEnt && exitEnt.kind === 'exit') { this.hooks.onExit(exitEnt.to, exitEnt); return; }
-    if (here?.ent.kind === 'item') return;
-    if (t === T.HERBE) this.hooks.onEncounterTile();
+  /**
+   * Déplacement libre : le joueur suit exactement la direction poussée, à 360°.
+   * La collision est résolue axe par axe, ce qui fait glisser le long des murs
+   * au lieu de s'y bloquer net quand on pousse en biais.
+   */
+  private walk(dt: number, dir: { x: number; y: number }, run: boolean) {
+    const mag = Math.hypot(dir.x, dir.y);
+    if (mag < DEADZONE) { this.walking = false; return; }
+
+    // Le stick dose la vitesse ; poussé à fond, il fait courir, ce qui donne enfin
+    // la course au tactile (au clavier, c'est Maj).
+    const fast = run || mag > .92;
+    const sp = (fast ? SPEED_RUN : SPEED) * Math.min(1, mag) * dt;
+    const ux = dir.x / mag, uy = dir.y / mag;
+    const fromX = this.px, fromY = this.py;
+    if (this.fits(this.px + ux * sp, this.py)) this.px += ux * sp;
+    if (this.fits(this.px, this.py + uy * sp)) this.py += uy * sp;
+
+    // On tourne vers la direction poussée par le plus court chemin.
+    const cible = Math.atan2(-ux, uy);
+    let d = cible - this.heading;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    this.heading += d * Math.min(1, dt * 14);
+    this.facing = facingOf(this.heading);
+    this.player.group.rotation.y = this.heading;
+
+    const moved = Math.hypot(this.px - fromX, this.py - fromY);
+    this.walking = moved > 1e-5;
+    this.player.group.position.set(this.px, Math.abs(Math.sin(this.clock * 9)) * (this.walking ? .04 : 0), this.py);
+    if (!this.walking) return;
+    this.advance(moved);
+  }
+
+  /** Conséquences d'une distance parcourue : pas, herbes hautes, changement de case. */
+  private advance(moved: number) {
+    this.stepDist += moved;
+    if (this.stepDist >= 1) { this.stepDist %= 1; this.hooks.onStep(); }
+
+    const tx = Math.round(this.px), ty = Math.round(this.py);
+    if (this.tileAt(tx, ty) === T.HERBE) {
+      // Un tirage par case parcourue : même fréquence qu'avec l'ancien pas à pas.
+      this.grassDist += moved;
+      if (this.grassDist >= 1) { this.grassDist %= 1; this.hooks.onEncounterTile(); return; }
+    } else this.grassDist = 0;
+
+    const idx = ty * this.map.w + tx;
+    if (idx === this.lastTile) return;
+    this.lastTile = idx;
+    this.onEnterTile(tx, ty);
     this.checkSight();
+  }
+
+  /** Portes et sorties : uniquement au moment où l'on change de case. */
+  private onEnterTile(x: number, y: number) {
+    const exitEnt = this.map.ents.find((e) => e.kind === 'exit' && e.x === x && e.y === y);
+    if (this.tileAt(x, y) === T.PORTE) {
+      const door = this.map.ents.find((e) => e.kind === 'door' && e.x === x && e.y === y);
+      if (door && door.kind === 'door') { this.hooks.onDoor(door.to); return; }
+    }
+    if (exitEnt && exitEnt.kind === 'exit') this.hooks.onExit(exitEnt.to, exitEnt);
   }
 
   private checkSight() {
@@ -939,7 +1038,7 @@ export class Overworld {
       for (let k = 1; k <= e.sight; k++) {
         const cx = e.x + dx * k, cy = e.y + dy * k;
         if (!WALKABLE.has(this.tileAt(cx, cy))) break;
-        if (cx === this.px && cy === this.py) { this.hooks.onTrainerSight(e); return; }
+        if (cx === Math.round(this.px) && cy === Math.round(this.py)) { this.hooks.onTrainerSight(e); return; }
       }
     }
   }
@@ -947,6 +1046,11 @@ export class Overworld {
 
 export function faceAngle(f: number): number {
   return [0, Math.PI / 2, Math.PI, -Math.PI / 2][f] ?? 0;
+}
+
+/** Indice de direction le plus proche d'une orientation continue. */
+export function facingOf(rad: number): number {
+  return ((Math.round(rad / (Math.PI / 2)) % 4) + 4) % 4;
 }
 
 export function entKey(map: GameMap, e: Ent): string {

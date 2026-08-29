@@ -19,10 +19,12 @@ import { DEX, hasSpecies, species, stageForLevel } from './data/species';
 import { item as getItem } from './data/items';
 import { createMon, maxHp, nameOf } from './game/mon';
 import { makeTeam } from './battle/engine';
-import { deleteSave, fmtTime, hasSave, loadGame, saveGame, state } from './game/state';
+import { deleteSave, fmtTime, hasSave, loadGame, saveGame, state, type Gender } from './game/state';
+import { buildCreature, buildHuman, type CreatureRig } from './creature/model';
+import { setPortraitSource, type HumanId } from './ui/portraits';
 
 import { advanceDialogue, ask, fade, openOverlay, promptText, say, setHudVisible, toast, ui } from './ui/ui';
-import { openMainMenu, openParty, openShop, openPC, portrait, setQualityHandler } from './ui/menus';
+import { bust, openMainMenu, openParty, openShop, openPC, portrait, setQualityHandler } from './ui/menus';
 
 registerSW({ immediate: true });
 
@@ -68,6 +70,7 @@ class Game {
       onInteract: (e) => void this.interact(e),
       onTrainerSight: (e) => void this.trainerSight(e),
     });
+    this.registerPortraits();
     setQualityHandler(() => this.applyQuality());
     this.applyQuality();
     this.bindTitle();
@@ -126,10 +129,14 @@ class Game {
   }
 
   private async newGame() {
-    $('#title').hidden = true;
+    // L'écran-titre reste en fond pendant toute l'intro : sans lui, le professeur
+    // parlait devant un écran noir, faute de carte chargée.
+    $('#title').classList.add('as-backdrop');
     this.mode = 'busy';
-    const name = await promptText('Comment t’appelles-tu ?', 'Ton prénom', 'Sacha', 12);
-    state.reset(name || 'Sacha');
+    const genre = await this.chooseGender();
+    const parDefaut = genre === 'f' ? 'Flora' : 'Sacha';
+    const name = await promptText('Comment t’appelles-tu ?', 'Ton prénom', parDefaut, 12);
+    state.reset(name || parDefaut, genre);
     await say([
       `Pr. Ombelle : Bonjour ${state.name} ! Bienvenue dans la région de Valmore.`,
       'Pr. Ombelle : Ici, les dresseurs voyagent avec des créatures et défient les 8 Arènes avant d’affronter la Ligue.',
@@ -144,6 +151,55 @@ class Game {
     setHudVisible(true);
     saveGame();
     await this.goto(START_ZONE, { silent: false });
+    $('#title').hidden = true;
+    $('#title').classList.remove('as-backdrop');
+  }
+
+  /**
+   * Branche les vignettes de l'interface sur la cuisson hors écran du moteur :
+   * menus, Pokédex et dialogues montrent ainsi les modèles réels du jeu.
+   */
+  private registerPortraits() {
+    const humains: Record<HumanId, () => CreatureRig> = {
+      'joueur-g': () => buildHuman(0x2a7fd4, 0xf2c9a0, 0x2b1d16, 0xe8434e),
+      'joueur-f': () => buildHuman(0xe0518a, 0xf2c9a0, 0x8a4326, 0xf6f8fc, true),
+      // Blouse claire et cheveux gris : le professeur se reconnaît au premier coup d'œil.
+      prof: () => buildHuman(0xf1f4f8, 0xeac39c, 0xb9c0c8),
+      rival: () => buildHuman(0x6b4bb5, 0xe8bb92, 0x8a3a2a),
+      // Silhouette neutre pour tout autre interlocuteur : dresseurs, gardes, marchands.
+      pnj: () => buildHuman(0x5f8f6a, 0xe0b48c, 0x3a2f28),
+    };
+    setPortraitSource({
+      creature: (id, shiny) =>
+        this.battleScene.sprites?.portrait(`sp:${id}${shiny ? '*' : ''}`, () => buildCreature(species(id), !!shiny)) ?? '',
+      human: (id) => this.battleScene.sprites?.portrait(`hu:${id}`, humains[id], true) ?? '',
+      packUrl: (id) => this.battleScene.sprites?.packUrl(species(id)) ?? Promise.resolve(null),
+    });
+  }
+
+  /** Choix du sexe : obligatoire, il détermine l'apparence et les accords. */
+  private chooseGender(): Promise<Gender> {
+    const opts: [Gender, string, string][] = [
+      ['g', 'Garçon', 'Casquette rouge, veste bleue.'],
+      ['f', 'Fille', 'Cheveux longs, bonnet blanc.'],
+    ];
+    return new Promise((resolve) => {
+      let done = false;
+      const open = () => openOverlay('Qui es-tu ?', (body, api) => {
+        for (const [id, label, sub] of opts) {
+          const c = document.createElement('button');
+          c.className = 'card';
+          c.append(bust(id === 'f' ? 'joueur-f' : 'joueur-g'));
+          const g = document.createElement('div');
+          g.className = 'grow';
+          g.innerHTML = `<div class="row1"><span class="nm">${label}</span></div><div class="sub">${sub}</div>`;
+          c.append(g);
+          c.onclick = () => { done = true; audio.sfx('select'); api.close(); resolve(id); };
+          body.append(c);
+        }
+      }, () => { if (!done) setTimeout(open, 0); });   // choix obligatoire
+      open();
+    });
   }
 
   private chooseStarter(): Promise<void> {

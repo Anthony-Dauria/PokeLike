@@ -51,8 +51,13 @@ export class Input {
     const clamped = Math.min(d, this.radius);
     dx = (dx / d) * clamped; dy = (dy / d) * clamped;
     this.knob.style.transform = `translate(${dx}px,${dy}px)`;
-    const dead = this.radius * 0.28;
-    this.axis = d < dead ? { x: 0, y: 0 } : { x: dx / this.radius, y: dy / this.radius };
+    // Zone morte courte : en déplacement libre, une poussée légère doit donner
+    // une marche lente plutôt que rien du tout. Au-delà, l'amplitude est réétalée
+    // sur [0,1] pour que la vitesse reparte de zéro au bord de la zone morte.
+    const dead = this.radius * 0.14;
+    if (d < dead) { this.axis = { x: 0, y: 0 }; return; }
+    const m = Math.min(1, (clamped - dead) / (this.radius - dead));
+    this.axis = { x: (dx / clamped) * m, y: (dy / clamped) * m };
   }
 
   private hold(el: HTMLElement | null, btn: Btn) {

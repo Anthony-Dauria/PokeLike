@@ -1,6 +1,7 @@
 import { TYPE_COLOR } from '../data/types';
 import { ITEMS, item as getItem, type Item } from '../data/items';
 import { DEX, species, type Species } from '../data/species';
+import { creaturePortrait, humanPortrait, packPortrait, type HumanId } from './portraits';
 import { move as getMove } from '../data/moves';
 import { STATUS_LABEL } from '../data/moves';
 import { GYMS } from '../data/world';
@@ -10,9 +11,8 @@ import { audio } from '../engine/audio';
 import { ask, card, closeOverlay, hpColor, openOverlay, say, section, toast, typeChip } from './ui';
 
 /* -------------------- vignette d'espèce -------------------- */
-export function portrait(spId: string, shiny = false): HTMLElement {
-  const sp = species(spId);
-  // Mêmes couleurs que le modèle 3D pour que la vignette « ressemble » à la créature.
+/** Carré coloré affiché tant qu'aucune image n'est disponible. */
+function initiales(sp: Species): HTMLElement {
   const a = sp.body ?? TYPE_COLOR[sp.types[0]];
   const b = sp.accent ?? TYPE_COLOR[sp.types[1] ?? sp.types[0]];
   const d = document.createElement('div');
@@ -26,9 +26,47 @@ export function portrait(spId: string, shiny = false): HTMLElement {
   d.style.color = '#0b1420';
   d.style.textShadow = '0 1px 0 rgba(255,255,255,.35)';
   d.textContent = sp.name.slice(0, 2);
-  if (shiny) d.style.boxShadow = '0 0 10px #ffd166 inset, 0 0 8px #ffd166';
   return d;
 }
+
+/**
+ * Vignette d'une créature. On montre le modèle du jeu, cuit hors écran, et on le
+ * remplace par l'image du pack si le joueur en a déposé une. Le carré à initiales
+ * ne sert plus que de secours quand le rendu n'est pas encore disponible.
+ */
+export function portrait(spId: string, shiny = false): HTMLElement {
+  const sp = species(spId);
+  const url = creaturePortrait(spId, shiny);
+  if (!url) return initiales(sp);
+
+  const img = document.createElement('img');
+  img.className = 'sprite';
+  img.src = url;
+  img.alt = sp.name;
+  img.decoding = 'async';
+  img.style.objectFit = 'contain';
+  img.style.imageRendering = 'pixelated';
+  if (shiny) img.style.filter = 'drop-shadow(0 0 4px #ffd166)';
+  void packPortrait(spId).then((p) => { if (p) img.src = p; });
+  return img;
+}
+
+/** Buste d'un personnage humain (joueur, professeur, rival). */
+export function bust(id: HumanId): HTMLElement {
+  const url = humanPortrait(id);
+  const d = document.createElement(url ? 'img' : 'div');
+  d.className = 'sprite';
+  if (url) {
+    (d as HTMLImageElement).src = url;
+    (d as HTMLImageElement).alt = '';
+    d.style.objectFit = 'contain';
+    d.style.imageRendering = 'pixelated';
+  } else {
+    d.style.background = 'linear-gradient(135deg,#8fb8e8,#4f6f9f)';
+  }
+  return d;
+}
+
 
 function monRow(m: Mon, el: HTMLElement) {
   el.append(portrait(m.sp, m.shiny));

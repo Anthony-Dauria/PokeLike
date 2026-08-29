@@ -71,7 +71,8 @@ export class BattleScene {
   private fx: { obj: THREE.Object3D; life: number; max: number; vy: number; spin: number; grow?: number }[] = [];
   private shake = 0;
   private trainer: CreatureRig | null = null;
-  private sprites: CreatureSprites | null = null;
+  /** Cuisson des sprites : sert aussi aux vignettes de l'interface. */
+  sprites: CreatureSprites | null = null;
   shadows = true;
   /** « sprites » = billboards cuits façon DS ; « 3d » = modèles affichés tels quels. */
   mode: 'sprites' | '3d' = 'sprites';

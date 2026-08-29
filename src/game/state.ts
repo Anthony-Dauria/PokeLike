@@ -2,9 +2,13 @@ import type { Mon } from './mon';
 import { createMon, healFull, nextUid, resetUid } from './mon';
 import { GYMS, START_ZONE } from '../data/world';
 
+/** Sexe du personnage joueur : « g » garçon, « f » fille. */
+export type Gender = 'g' | 'f';
+
 export interface SaveData {
   version: number;
   name: string;
+  gender?: Gender;
   money: number;
   playTime: number;
   starter: string;
@@ -34,6 +38,8 @@ export const SAVE_VERSION = 1;
 
 export class GameState {
   name = 'Sacha';
+  /** Sexe du personnage : choisi au début, sert au modèle et aux accords. */
+  gender: Gender = 'g';
   money = 3000;
   playTime = 0;
   starter = '';
@@ -92,7 +98,7 @@ export class GameState {
   /* ---------- sérialisation ---------- */
   toJSON(): SaveData {
     return {
-      version: SAVE_VERSION, name: this.name, money: this.money, playTime: Math.round(this.playTime),
+      version: SAVE_VERSION, name: this.name, gender: this.gender, money: this.money, playTime: Math.round(this.playTime),
       starter: this.starter, party: this.party, box: this.box, bag: this.bag, badges: this.badges,
       flags: this.flags, seen: [...this.seen], caught: [...this.caught],
       zone: this.zone, x: this.x, y: this.y, facing: this.facing, lastCenter: this.lastCenter,
@@ -101,7 +107,10 @@ export class GameState {
   }
 
   load(d: SaveData) {
-    this.name = d.name; this.money = d.money; this.playTime = d.playTime; this.starter = d.starter;
+    this.name = d.name;
+    // Sauvegardes d'avant le choix du sexe : on reste sur le garçon par défaut.
+    this.gender = d.gender === 'f' ? 'f' : 'g';
+    this.money = d.money; this.playTime = d.playTime; this.starter = d.starter;
     this.party = d.party; this.box = d.box ?? []; this.bag = d.bag ?? {}; this.badges = d.badges ?? [];
     this.flags = d.flags ?? {}; this.seen = new Set(d.seen ?? []); this.caught = new Set(d.caught ?? []);
     this.zone = d.zone; this.x = d.x; this.y = d.y; this.facing = d.facing ?? 0;
@@ -113,9 +122,9 @@ export class GameState {
     resetUid(Math.max(d.uid ?? 1, ...this.party.map((m) => m.uid + 1), ...this.box.map((m) => m.uid + 1), 1));
   }
 
-  reset(name: string) {
+  reset(name: string, gender: Gender = 'g') {
     resetUid(1);
-    this.name = name; this.money = 3000; this.playTime = 0; this.starter = '';
+    this.name = name; this.gender = gender; this.money = 3000; this.playTime = 0; this.starter = '';
     this.party = []; this.box = []; this.badges = []; this.flags = {};
     this.seen = new Set(); this.caught = new Set();
     this.bag = { ball: 5, potion: 3 };
