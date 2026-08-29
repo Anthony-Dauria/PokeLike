@@ -1,0 +1,34 @@
+{
+  "out": "public/monde/scenes", "tight": true, "scale": 1, "pad": 1,
+  "dark": true, "bgSeuil": 62,
+  "items": [
+    { "name": "int-centre",      "x": 14,   "y": 55,  "w": 232, "h": 186 },
+    { "name": "int-mart",        "x": 261,  "y": 55,  "w": 185, "h": 186 },
+    { "name": "int-maison",      "x": 461,  "y": 55,  "w": 184, "h": 186 },
+    { "name": "int-labo",        "x": 658,  "y": 56,  "w": 197, "h": 185 },
+    { "name": "int-arene",       "x": 869,  "y": 54,  "w": 208, "h": 192 },
+    { "name": "int-bibliotheque","x": 14,   "y": 271, "w": 227, "h": 167 },
+    { "name": "int-dresseurs",   "x": 251,  "y": 271, "w": 204, "h": 178 },
+    { "name": "int-phare",       "x": 466,  "y": 270, "w": 131, "h": 178 },
+    { "name": "int-observatoire","x": 610,  "y": 271, "w": 203, "h": 180 },
+    { "name": "int-gare",        "x": 825,  "y": 271, "w": 252, "h": 174 },
+
+    { "name": "grotte-sombre",   "x": 1100, "y": 55,  "w": 203, "h": 225 },
+    { "name": "grotte-lac",      "x": 1320, "y": 54,  "w": 206, "h": 223 },
+    { "name": "grotte-glace",    "x": 1101, "y": 310, "w": 203, "h": 206 },
+    { "name": "ruines",          "x": 1318, "y": 310, "w": 205, "h": 202 },
+    { "name": "volcan",          "x": 1099, "y": 543, "w": 204, "h": 187 },
+    { "name": "grotte-cristal",  "x": 1320, "y": 543, "w": 203, "h": 187 },
+    { "name": "antre",           "x": 1138, "y": 744, "w": 344, "h": 155 },
+
+    { "name": "ext-pont",        "x": 15,   "y": 509, "w": 242, "h": 156 },
+    { "name": "ext-plateforme",  "x": 264,  "y": 508, "w": 233, "h": 157 },
+    { "name": "ext-etang",       "x": 509,  "y": 507, "w": 255, "h": 158 },
+    { "name": "ext-camping",     "x": 777,  "y": 488, "w": 301, "h": 177 },
+
+    { "name": "int-grotte",      "x": 18,   "y": 718, "w": 231, "h": 163 },
+    { "name": "int-base",        "x": 264,  "y": 718, "w": 247, "h": 163 },
+    { "name": "int-navire",      "x": 534,  "y": 697, "w": 241, "h": 185 },
+    { "name": "int-fournaise",   "x": 792,  "y": 694, "w": 271, "h": 182 }
+  ]
+}

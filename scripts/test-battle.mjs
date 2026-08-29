@@ -24,7 +24,7 @@ const browser = await chromium.launch({ ...(process.env.CHROMIUM_PATH ? { execut
 const page = await browser.newPage({ viewport: { width: 412, height: 890 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
 const errors = [];
 page.on('pageerror', (e) => { errors.push('PAGEERROR: ' + e.message); console.log('PAGEERROR', e.message, e.stack); });
-page.on('console', (m) => { if (m.type() === 'error' && !/sprites\//.test(m.text() + m.location().url)) { errors.push('CONSOLE: ' + m.text()); console.log('CONSOLE', m.text()); } });
+page.on('console', (m) => { if (m.type() === 'error' && !/sprites\//.test(m.text() + m.location().url)) { errors.push('CONSOLE: ' + m.text() + ' @ ' + m.location().url); console.log('CONSOLE', m.text(), '@', m.location().url); } });
 
 await page.goto('http://localhost:4175/index.html', { waitUntil: 'networkidle' });
 await page.waitForTimeout(500);
@@ -34,6 +34,9 @@ await page.click('[data-act="new"]');
 await page.waitForTimeout(400);
 const yesOverwrite = page.locator('#dlg-choices .btn').first();
 if (await yesOverwrite.count()) { await yesOverwrite.click(); await page.waitForTimeout(300); }
+// choix du sexe, désormais demandé avant le nom
+await page.locator('#overlay button.card').first().click();
+await page.waitForTimeout(400);
 await page.fill('#overlay input', 'Duel');
 await page.click('#overlay .btn.primary');
 const advance = async (n = 12) => {

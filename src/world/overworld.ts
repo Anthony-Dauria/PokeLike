@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { T, WALKABLE, type Ent, type GameMap } from './mapgen';
+import { drawnTile, tileTexture, type TileFamily } from './tiletex';
+import { billboardGeometry, sprite2d, spriteMaterial, TILT } from './sprites2d';
+import { state } from '../game/state';
 import { animateRig, buildHuman, type CreatureRig } from '../creature/model';
 import { RNG, hashStr } from '../engine/rng';
 import { addLights, addSky, disposeObject, disposeScene, toonGradient, uTime, windify, type SceneLights } from '../engine/renderer';
@@ -104,15 +107,29 @@ function valueNoise(x: number, y: number, seed: number): number {
   return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
 }
 
+/** Rayon de collision du joueur, en cases : assez fin pour passer un couloir d'une case. */
+const RADIUS = .34;
+/** Vitesse de marche et de course, en cases par seconde. */
+const SPEED = 4.0, SPEED_RUN = 6.4;
+/** En dessous, on considère le stick au repos. */
+const DEADZONE = .12;
+
 export class Overworld {
   scene = new THREE.Scene();
   map!: GameMap;
   px = 0; py = 0;
   facing = 0;
-  private moving = false;
-  private moveT = 0;
-  private moveDur = .21;
-  private fromX = 0; private fromY = 0; private toX = 0; private toY = 0;
+  /** Orientation continue, en radians, dans la convention de `faceAngle`. */
+  heading = 0;
+  private walking = false;
+  /** Distance parcourue depuis le dernier « pas » compté. */
+  private stepDist = 0;
+  /** Distance parcourue dans les hautes herbes depuis le dernier tirage. */
+  private grassDist = 0;
+  /** Case occupée à la frame précédente : portes et sorties ne se déclenchent qu'au changement. */
+  private lastTile = -1;
+  /** Cases prises par du mobilier posé au décor : infranchissables, sans toucher à la carte. */
+  private meubles = new Set<number>();
   private player!: CreatureRig;
   private actors: ActorView[] = [];
   private removed = new Set<string>();
@@ -130,7 +147,7 @@ export class Overworld {
     this.hooks = hooks;
   }
 
-  get busy() { return this.moving; }
+  get busy() { return false; }
 
   /** Reconstruit entièrement la scène pour une carte. */
   load(map: GameMap, spawn: [number, number], facing = 0, hidden: Set<string> = new Set(), beaten: Set<string> = new Set()) {
@@ -146,17 +163,23 @@ export class Overworld {
     addSky(this.scene, pal.skyTop, pal.skyMid, pal.skyLow, map.indoor ? 0.1 : 0.5);
     this.lights = addLights(this.scene, pal.light ?? pal.skyMid, pal.ground, map.indoor ? 0xffeacb : 0xfff6e0, this.shadows);
 
+    this.meubles.clear();
     this.buildTerrain(map, pal);
     this.buildProps(map, pal);
     if (!map.indoor) this.buildHorizon(map, pal);
     if (pal.clouds && !map.indoor) this.buildClouds(map, pal);
     this.buildActors(map);
 
-    this.player = buildHuman(0x2a7fd4, 0xf2c9a0, 0x2b1d16, 0xe8434e);
+    // Apparence du joueur selon le sexe choisi au début de la partie.
+    this.player = state.gender === 'f'
+      ? buildHuman(0xe0518a, 0xf2c9a0, 0x8a4326, 0xf6f8fc, true)
+      : buildHuman(0x2a7fd4, 0xf2c9a0, 0x2b1d16, 0xe8434e);
     this.scene.add(this.player.group);
     this.px = spawn[0]; this.py = spawn[1];
-    this.facing = facing;
-    this.moving = false;
+    this.setFacing(facing);
+    this.nudgeIntoPlace();
+    this.lastTile = this.tileIndex(this.px, this.py);
+    this.stepDist = this.grassDist = 0;
     this.syncPlayer();
     this.camTarget.set(this.px, 0, this.py);
   }
@@ -246,40 +269,77 @@ export class Overworld {
       return out;
     };
 
-    const n = W * H;
-    const pos = new Float32Array(n * 4 * 3);
-    const col = new Float32Array(n * 4 * 3);
-    const idx = new Uint32Array(n * 6);
-    let v = 0, f = 0;
+    /* --- un maillage par matière : chacune porte son motif pixel, répété à la
+           case. Les UV suivent les coordonnées du monde, donc les motifs se
+           raccordent d'une tuile à l'autre sans couture. --- */
+    const matiere = (t: number): TileFamily =>
+      t === T.EAU ? 'eau'
+        : t === T.SABLE ? 'sable'
+          : t === T.CHEMIN || t === T.SORTIE ? 'chemin'
+            : t === T.MUR || t === T.OBSTACLE ? 'roche'
+              : t === T.TAPIS || t === T.COMPTOIR ? 'sol'
+                // T.SOL, c'est le terrain nu : de la pelouse dehors, du carrelage dedans.
+                // T.HERBE désigne les hautes herbes, pas le sol ordinaire.
+                : map.indoor ? 'sol' : 'herbe';
+
+    const dessins = SOLS_DESSINES[map.biome] ?? {};
+    interface Lot { pos: number[]; col: number[]; uv: number[]; idx: number[] }
+    const lots = new Map<TileFamily, Lot>();
     const tmpCol = new THREE.Color();
     const corners: [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 1]];
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const t = map.tiles[y * W + x];
+        const fam = matiere(t);
+        let lot = lots.get(fam);
+        if (!lot) { lot = { pos: [], col: [], uv: [], idx: [] }; lots.set(fam, lot); }
+        const v = lot.pos.length / 3;
         // Seule l'eau descend : décaler les chemins créerait une fissure visible avec leurs voisins.
         const flatY = t === T.EAU ? -.86 : null;   // lit du plan d'eau, bien en dessous
-        const base = v * 3;
-        corners.forEach(([cx, cy], i) => {
+        // Un sol dessiné est une tuile complète : on lui donne des UV de 0 à 1 sur
+        // la case, retournées au hasard pour que la répétition ne saute pas aux
+        // yeux. Un motif procédural, lui, se raccorde d'une case à l'autre et
+        // suit donc les coordonnées du monde.
+        const dessine = !!dessins[fam];
+        const fx = dessine && ((x * 73 + y * 31) & 1) ? 1 : 0;
+        const fy = dessine && ((x * 17 + y * 91) & 2) ? 1 : 0;
+        const gris = dessine ? ao(x, y) : 0;
+        for (const [cx, cy] of corners) {
           const co = ((y + cy) * CW + (x + cx));
-          pos[base + i * 3] = x - .5 + cx;
-          pos[base + i * 3 + 1] = flatY ?? corner[co];
-          pos[base + i * 3 + 2] = y - .5 + cy;
-          blended(x, y, cx, cy, tmpCol);
-          col[base + i * 3] = tmpCol.r; col[base + i * 3 + 1] = tmpCol.g; col[base + i * 3 + 2] = tmpCol.b;
-        });
-        idx[f] = v; idx[f + 1] = v + 2; idx[f + 2] = v + 1;
-        idx[f + 3] = v; idx[f + 4] = v + 3; idx[f + 5] = v + 2;
-        v += 4; f += 6;
+          lot.pos.push(x - .5 + cx, flatY ?? corner[co], y - .5 + cy);
+          if (dessine) {
+            // Léger rognage : le carré source a ses propres bords assombris, qui
+            // dessineraient une grille à chaque jointure de cases.
+            const u = INSET + cx * (1 - 2 * INSET), v = INSET + cy * (1 - 2 * INSET);
+            lot.uv.push(fx ? 1 - u : u, fy ? v : 1 - v);
+            lot.col.push(gris, gris, gris);
+          } else {
+            lot.uv.push(x - .5 + cx, -(y - .5 + cy));
+            blended(x, y, cx, cy, tmpCol);
+            lot.col.push(tmpCol.r, tmpCol.g, tmpCol.b);
+          }
+        }
+        lot.idx.push(v, v + 2, v + 1, v, v + 3, v + 2);
       }
     }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geo.setIndex(new THREE.BufferAttribute(idx, 1));
-    geo.computeVertexNormals();
-    const ground = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGradient() }));
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+
+    for (const [fam, lot] of lots) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(lot.pos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(lot.col, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(lot.uv, 2));
+      geo.setIndex(lot.idx);
+      geo.computeVertexNormals();
+      const dessin = dessins[fam];
+      const tex = dessin ? drawnTile(dessin) : tileTexture(fam);
+      const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGradient() });
+      // Motif procédural : niveaux de gris proches du blanc, il assombrit le
+      // détail sans toucher à la teinte. Sol dessiné : il porte déjà sa couleur.
+      if (tex) mat.map = tex;
+      const ground = new THREE.Mesh(geo, mat);
+      ground.receiveShadow = true;
+      this.scene.add(ground);
+    }
 
     // Terrain de remplissage au-delà des bords, affleurant le sol.
     const pad = map.biome === 'interieur' ? 8 : 60;
@@ -391,6 +451,8 @@ export class Overworld {
         });
         im.instanceMatrix.needsUpdate = true; arms.instanceMatrix.needsUpdate = true;
         if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      } else if (this.arbresDessines(obs, rng)) {
+        // Arbres dessinés : rien d'autre à construire, cf. addArbres.
       } else {
         const snowy = pal.prop === 'snowtree';
         const trunkMat = toon(pal.trunk);
@@ -549,12 +611,42 @@ export class Overworld {
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
     }
 
-    /* -- murs / bâtiments -- */
-    const mur = tiles[T.MUR] ?? [];
+    /* -- bâtiments dessinés --
+       Chaque porte identifie un édifice : on remonte à ses murs par propagation,
+       on pose un panneau à sa taille, et ces tuiles sortent du rendu en boîtes.
+       La collision, elle, ne change pas : les murs restent infranchissables. */
+    const murBati = new Set<number>();
+    const portesDessinees = new Set<number>();
+    if (!map.indoor) {
+      for (const e of map.ents) {
+        if (e.kind !== 'door') continue;
+        const tuiles = this.batimentTiles(map, e.x, e.y);
+        if (!tuiles.length) continue;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const [tx, ty] of tuiles) {
+          murBati.add(ty * map.w + tx);
+          x0 = Math.min(x0, tx); x1 = Math.max(x1, tx);
+          y0 = Math.min(y0, ty); y1 = Math.max(y1, ty);
+        }
+        this.addBatiment(nomBatiment(e.to, e.label), x0, y0, x1, y1);
+        portesDessinees.add(e.y * map.w + e.x);
+      }
+    }
+
+    /* -- murs restants : intérieurs et clôtures, toujours en volumes -- */
+    const mur = (tiles[T.MUR] ?? []).filter(([x, y]) => !murBati.has(y * map.w + x));
     if (mur.length) {
       const wallCol = map.indoor ? 0xb9c3d4 : 0xe2d6bf;
-      const im = inst(new THREE.BoxGeometry(1, 2.2, 1), toon(wallCol), mur.length);
-      const roof = inst(new THREE.BoxGeometry(1.1, .42, 1.1), toon(map.indoor ? (map.accent ?? 0x6b5240) : 0xc4564e), mur.length);
+      // Bardage et tuiles : le nombre de répétitions suit les dimensions du volume,
+      // sinon le motif s'étire sur les faces hautes.
+      const wallMat = toon(wallCol);
+      const wallTex = tileTexture('mur', 1, 2.2);
+      if (wallTex) wallMat.map = wallTex;
+      const roofMat = toon(map.indoor ? (map.accent ?? 0x6b5240) : 0xc4564e);
+      const roofTex = tileTexture('toit');
+      if (roofTex) roofMat.map = roofTex;
+      const im = inst(new THREE.BoxGeometry(1, 2.2, 1), wallMat, mur.length);
+      const roof = inst(new THREE.BoxGeometry(1.1, .42, 1.1), roofMat, mur.length);
       const trim = inst(new THREE.BoxGeometry(1.14, .12, 1.14), toon(map.indoor ? 0x7f8ba0 : 0x9c3f3a), mur.length);
       const plinth = map.indoor ? inst(new THREE.BoxGeometry(1.04, .28, 1.04), toon(0x8a94a8), mur.length) : null;
       // Façades sud : on pose une fenêtre sur les murs qui donnent sur l'extérieur.
@@ -615,9 +707,14 @@ export class Overworld {
       im.instanceMatrix.needsUpdate = true; top.instanceMatrix.needsUpdate = true;
     }
 
+    /* -- mobilier dessiné, le long du mur du fond des intérieurs -- */
+    if (map.indoor) this.meublerInterieur(map, rng);
+
     /* -- portes & sorties -- */
     for (const e of map.ents) {
       if (e.kind === 'door') {
+        // Le dessin du bâtiment contient déjà sa porte : inutile d'en poser une.
+        if (portesDessinees.has(e.y * map.w + e.x)) continue;
         const frame = new THREE.Mesh(new THREE.BoxGeometry(1.16, 2, .3), toon(0x5b3f2c));
         frame.position.set(e.x, 1, e.y - .45);
         frame.castShadow = true; frame.receiveShadow = true;
@@ -774,6 +871,131 @@ export class Overworld {
     }
   }
 
+  /**
+   * Murs formant le bâtiment auquel appartient une porte. On part des voisins de
+   * la porte et on propage sur les T.MUR contigus : le générateur pose les
+   * édifices en rectangles pleins, la propagation suffit donc à les cerner.
+   */
+  private batimentTiles(map: GameMap, dx: number, dy: number): [number, number][] {
+    const vu = new Set<number>();
+    const out: [number, number][] = [];
+    const pile: [number, number][] = [];
+    const pousse = (x: number, y: number) => {
+      if (x < 0 || y < 0 || x >= map.w || y >= map.h) return;
+      const k = y * map.w + x;
+      if (vu.has(k) || map.tiles[k] !== T.MUR) return;
+      vu.add(k); pile.push([x, y]);
+    };
+    for (const [ox, oy] of [[0, -1], [-1, 0], [1, 0], [0, 1], [-1, -1], [1, -1]]) pousse(dx + ox, dy + oy);
+    while (pile.length) {
+      const [x, y] = pile.pop()!;
+      out.push([x, y]);
+      pousse(x - 1, y); pousse(x + 1, y); pousse(x, y - 1); pousse(x, y + 1);
+    }
+    // La porte occupe une tuile du rectangle : on la compte pour le cadrage.
+    out.push([dx, dy]);
+    return out;
+  }
+
+  /**
+   * Arbres en panneaux dessinés, groupés par essence en maillages instanciés :
+   * une centaine d'arbres tient ainsi en trois appels de rendu au lieu de cent.
+   * Retourne false si les images manquent, auquel cas l'appelant garde ses cônes.
+   */
+  private arbresDessines(obs: [number, number][], rng: RNG): boolean {
+    const essences = ['sapin', 'arbre-fonce', 'arbre-clair'];
+    if (!essences.every((n) => sprite2d(n).ready)) {
+      // Premier chargement : on demande les images et on laisse les cônes pour
+      // cette carte. La suivante, elles seront en cache.
+      for (const n of essences) sprite2d(n, () => {});
+      return false;
+    }
+    const lots: [number, number][][] = essences.map(() => []);
+    for (const t of obs) lots[rng.int(essences.length)].push(t);
+    essences.forEach((nom, k) => {
+      const tuiles = lots[k];
+      if (!tuiles.length) return;
+      const s = sprite2d(nom);
+      const im = new THREE.InstancedMesh(billboardGeometry(), spriteMaterial(s), tuiles.length);
+      const d = new THREE.Object3D();
+      tuiles.forEach(([x, y], i) => {
+        const h = 2.1 + rng.next() * .7;
+        d.position.set(x + (rng.next() - .5) * .28, 0, y + .18);
+        d.rotation.set(TILT, 0, 0);
+        d.scale.set(h * s.aspect, h, 1);
+        d.updateMatrix();
+        im.setMatrixAt(i, d.matrix);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;
+      this.scene.add(im);
+    });
+    return true;
+  }
+
+  /**
+   * Garnit le mur du fond d'un intérieur avec du mobilier dessiné. Les pièces
+   * restent générées : on ne fait qu'habiller la première rangée libre, celle qui
+   * longe le mur, en laissant partout ailleurs le passage.
+   *
+   * Les cases occupées deviennent infranchissables par `meubles`, sans modifier
+   * la carte elle-même : elle est partagée et servirait telle quelle au retour.
+   */
+  private meublerInterieur(map: GameMap, rng: RNG) {
+    // Les noms portent leur sous-dossier : sprite2d lit public/monde/<nom>.png.
+    const choix = ['props/casier', 'props/machine', 'props/etagere', 'props/distributeur',
+      'props/plante', 'props/plante-2', 'props/caisses'];
+    if (!choix.every((n) => sprite2d(n).ready)) { for (const n of choix) sprite2d(n, () => {}); return; }
+
+    // Cases longeant un mur : la rangée du fond, puis les deux murs latéraux. Le
+    // fond est souvent pris par le comptoir, les côtés restent visibles et libres.
+    const cases: [number, number][] = [];
+    for (let x = 1; x < map.w - 1; x++) cases.push([x, 2]);
+    for (let y = 3; y < map.h - 2; y++) { cases.push([1, y]); cases.push([map.w - 2, y]); }
+
+    const pris: { nom: string; x: number; y: number }[] = [];
+    for (const [x, y] of cases) {
+      const t = map.tiles[y * map.w + x];
+      if (!WALKABLE.has(t) || t === T.PORTE || t === T.COMPTOIR) continue;
+      // On laisse libres les abords d'une entité : comptoir, PNJ, escalier, objet.
+      if (map.ents.some((e) => Math.abs(e.x - x) <= 1 && Math.abs(e.y - y) <= 1)) continue;
+      // Pas deux meubles côte à côte, pour ne pas murer un passage.
+      if (pris.some((p) => Math.abs(p.x - x) + Math.abs(p.y - y) <= 1)) continue;
+      if (!rng.chance(.5)) continue;
+      pris.push({ nom: choix[rng.int(choix.length)], x, y });
+    }
+    for (const { nom, x, y } of pris) {
+      const s = sprite2d(nom);
+      const mesh = new THREE.Mesh(billboardGeometry(), spriteMaterial(s));
+      const h = 1.15;
+      mesh.position.set(x, 0, y + .1);
+      mesh.rotation.x = TILT;
+      mesh.scale.set(h * (s.aspect || 1), h, 1);
+      this.scene.add(mesh);
+      this.meubles.add(y * map.w + x);
+    }
+  }
+
+  /** Pose le panneau d'un bâtiment sur l'emprise donnée. */
+  private addBatiment(nom: string, x0: number, _y0: number, x1: number, y1: number) {
+    const s = sprite2d(nom);
+    const mesh = new THREE.Mesh(billboardGeometry(), spriteMaterial(s));
+    // Base sur la façade avant : incliné vers la caméra, le panneau recouvre
+    // ensuite toute la profondeur de l'emprise.
+    mesh.position.set((x0 + x1) / 2, 0, y1 + .2);
+    mesh.rotation.x = TILT;
+    const ajuste = () => {
+      // Le panneau couvre l'emprise, sans plus : incliné vers la caméra il paraît
+      // déjà plus haut qu'un mur droit de même taille.
+      const larg = (x1 - x0 + 1) + .2;
+      mesh.scale.set(larg, larg / (s.aspect || 1), 1);
+    };
+    ajuste();
+    // Le rapport n'est connu qu'au chargement : on recadre à l'arrivée de l'image.
+    sprite2d(nom, ajuste);
+    this.scene.add(mesh);
+  }
+
   /* ---------------- requêtes ---------------- */
   tileAt(x: number, y: number): number {
     if (x < 0 || y < 0 || x >= this.map.w || y >= this.map.h) return T.OBSTACLE;
@@ -786,8 +1008,45 @@ export class Overworld {
 
   private blocked(x: number, y: number): boolean {
     if (!WALKABLE.has(this.tileAt(x, y))) return true;
+    if (this.meubles.has(y * this.map.w + x)) return true;
     const e = this.entAt(x, y);
     return !!e && e.kind !== 'exit';
+  }
+
+  /**
+   * Décale le joueur si son cercle mord un obstacle. Les points d'apparition sont
+   * donnés à la case ; avec un rayon, un angle de mur peut les rendre invalides.
+   */
+  private nudgeIntoPlace() {
+    if (this.fits(this.px, this.py)) return;
+    for (const r of [.25, .5]) {
+      for (const [ox, oy] of [[0, -r], [0, r], [-r, 0], [r, 0], [-r, -r], [r, -r], [-r, r], [r, r]]) {
+        if (this.fits(this.px + ox, this.py + oy)) { this.px += ox; this.py += oy; return; }
+      }
+    }
+  }
+
+  /** Index de la case sous une position continue. */
+  private tileIndex(x: number, y: number): number {
+    return Math.round(y) * this.map.w + Math.round(x);
+  }
+
+  /**
+   * Le joueur tient-il à cette position ? On teste les quatre coins de son cercle :
+   * en déplacement libre, il faut empêcher de traverser un angle de mur en biais.
+   */
+  private fits(x: number, y: number): boolean {
+    for (const ox of [-RADIUS, RADIUS]) {
+      for (const oy of [-RADIUS, RADIUS]) {
+        if (this.blocked(Math.round(x + ox), Math.round(y + oy))) return false;
+      }
+    }
+    return true;
+  }
+
+  /** Vecteur unitaire de l'orientation courante (x = est, y = sud). */
+  private aim(): [number, number] {
+    return [-Math.sin(this.heading), Math.cos(this.heading)];
   }
 
   removeEnt(key: string) {
@@ -803,17 +1062,31 @@ export class Overworld {
   }
 
   facingTile(): [number, number] {
-    const [dx, dy] = DIRV[this.facing];
-    return [this.px + dx, this.py + dy];
+    const [dx, dy] = this.aim();
+    return [Math.round(this.px + dx * .85), Math.round(this.py + dy * .85)];
   }
 
-  /** Entité devant le joueur (interaction A). */
+  /**
+   * Entité devant le joueur (interaction A). En déplacement libre on ne peut plus
+   * exiger l'alignement parfait d'une grille : on prend l'entité la plus proche
+   * dans un cône devant soi, et on retombe sur la case visée pour les comptoirs.
+   */
   front(): Ent | undefined {
+    const [dx, dy] = this.aim();
+    let best: Ent | undefined, bestD = Infinity;
+    for (const a of this.actors) {
+      const e = a.ent;
+      if (e.kind === 'exit') continue;
+      const vx = e.x - this.px, vy = e.y - this.py;
+      const d = Math.hypot(vx, vy);
+      if (d > 1.8 || d < 1e-4) continue;
+      // cos > .45 ≈ un cône de ±63°, assez large pour rester agréable au pouce.
+      if ((vx * dx + vy * dy) / d < .45) continue;
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (best) return best;
     const [x, y] = this.facingTile();
-    const e = this.entAt(x, y);
-    if (e) return e;
-    const t = this.tileAt(x, y);
-    if (t === T.COMPTOIR) {
+    if (this.tileAt(x, y) === T.COMPTOIR) {
       const near = this.actors.find((a) => (a.ent.kind === 'heal' || a.ent.kind === 'shop') && Math.abs(a.ent.x - x) <= 2 && Math.abs(a.ent.y - y) <= 2);
       return near?.ent;
     }
@@ -822,23 +1095,34 @@ export class Overworld {
 
   private syncPlayer() {
     this.player.group.position.set(this.px, 0, this.py);
-    this.player.group.rotation.y = faceAngle(this.facing);
+    this.player.group.rotation.y = this.heading;
   }
 
-  setFacing(f: number) { this.facing = f; this.player.group.rotation.y = faceAngle(f); }
+  /** Oriente le joueur depuis un indice de direction (0 sud, 1 ouest, 2 nord, 3 est). */
+  setFacing(f: number) {
+    this.facing = f;
+    this.heading = faceAngle(f);
+    if (this.player) this.player.group.rotation.y = this.heading;
+  }
 
-  /** Recule le joueur d'une case (sortie bloquée). */
+  /** Recule le joueur d'un pas (sortie bloquée). */
   pushBack() {
-    const [dx, dy] = DIRV[this.facing];
-    const nx = this.px - dx, ny = this.py - dy;
-    if (WALKABLE.has(this.tileAt(nx, ny))) { this.px = nx; this.py = ny; }
+    const [dx, dy] = this.aim();
+    for (const d of [.6, 1, 1.4]) {
+      const nx = this.px - dx * d, ny = this.py - dy * d;
+      if (this.fits(nx, ny)) { this.px = nx; this.py = ny; break; }
+    }
+    this.lastTile = this.tileIndex(this.px, this.py);
     this.player.group.position.set(this.px, 0, this.py);
   }
 
   /** Téléporte le joueur sur une case. */
   place(x: number, y: number, facing = this.facing) {
-    this.px = x; this.py = y; this.facing = facing;
-    this.moving = false;
+    this.px = x; this.py = y;
+    this.setFacing(facing);
+    // La case d'arrivée ne doit pas redéclencher la porte qu'on vient d'emprunter.
+    this.lastTile = this.tileIndex(x, y);
+    this.stepDist = this.grassDist = 0;
     this.syncPlayer();
     this.camTarget.set(x, 0, y);
   }
@@ -859,35 +1143,9 @@ export class Overworld {
     const t = this.clock;
     uTime.value = t;
 
-    if (!this.paused) {
-      if (this.moving) {
-        this.moveT += dt / this.moveDur;
-        if (this.moveT >= 1) {
-          this.moveT = 1; this.moving = false;
-          this.px = this.toX; this.py = this.toY;
-          this.player.group.position.set(this.px, 0, this.py);
-          this.onArrive();
-        } else {
-          const k = this.moveT;
-          this.player.group.position.set(
-            this.fromX + (this.toX - this.fromX) * k, Math.sin(k * Math.PI) * .05,
-            this.fromY + (this.toY - this.fromY) * k,
-          );
-        }
-      } else if (Math.abs(dir.x) > .3 || Math.abs(dir.y) > .3) {
-        const f = Math.abs(dir.x) > Math.abs(dir.y) ? (dir.x < 0 ? 1 : 3) : (dir.y < 0 ? 2 : 0);
-        if (f !== this.facing) this.setFacing(f);
-        const [dx, dy] = DIRV[f];
-        const nx = this.px + dx, ny = this.py + dy;
-        if (!this.blocked(nx, ny)) {
-          this.moving = true; this.moveT = 0;
-          this.moveDur = run ? .13 : .2;
-          this.fromX = this.px; this.fromY = this.py; this.toX = nx; this.toY = ny;
-        }
-      }
-    }
+    if (!this.paused) this.walk(dt, dir, run);
 
-    animateRig(this.player, t, this.moving ? 1 : 0);
+    animateRig(this.player, t, this.walking ? 1 : 0);
     for (const a of this.actors) {
       if (a.ent.kind === 'npc' || a.ent.kind === 'trainer' || a.ent.kind === 'leader' || a.ent.kind === 'boss' || a.ent.kind === 'heal' || a.ent.kind === 'shop') animateRig(a.rig, t);
       else if (a.ent.kind === 'item') { a.rig.group.rotation.y = t * 1.4; a.rig.group.position.y = .38 + Math.sin(t * 2) * .08; }
@@ -915,20 +1173,66 @@ export class Overworld {
     }
   }
 
-  private onArrive() {
-    this.hooks.onStep();
-    const t = this.tileAt(this.px, this.py);
-    const here = this.actors.find((a) => a.ent.x === this.px && a.ent.y === this.py);
-    const exitEnt = this.map.ents.find((e) => e.kind === 'exit' && e.x === this.px && e.y === this.py);
-    if (t === T.PORTE) {
-      const door = this.map.ents.find((e) => e.kind === 'door' && e.x === this.px && e.y === this.py);
-      if (door && door.kind === 'door') { this.hooks.onDoor(door.to); return; }
-      if (exitEnt && exitEnt.kind === 'exit') { this.hooks.onExit(exitEnt.to, exitEnt); return; }
-    }
-    if (exitEnt && exitEnt.kind === 'exit') { this.hooks.onExit(exitEnt.to, exitEnt); return; }
-    if (here?.ent.kind === 'item') return;
-    if (t === T.HERBE) this.hooks.onEncounterTile();
+  /**
+   * Déplacement libre : le joueur suit exactement la direction poussée, à 360°.
+   * La collision est résolue axe par axe, ce qui fait glisser le long des murs
+   * au lieu de s'y bloquer net quand on pousse en biais.
+   */
+  private walk(dt: number, dir: { x: number; y: number }, run: boolean) {
+    const mag = Math.hypot(dir.x, dir.y);
+    if (mag < DEADZONE) { this.walking = false; return; }
+
+    // Le stick dose la vitesse ; poussé à fond, il fait courir, ce qui donne enfin
+    // la course au tactile (au clavier, c'est Maj).
+    const fast = run || mag > .92;
+    const sp = (fast ? SPEED_RUN : SPEED) * Math.min(1, mag) * dt;
+    const ux = dir.x / mag, uy = dir.y / mag;
+    const fromX = this.px, fromY = this.py;
+    if (this.fits(this.px + ux * sp, this.py)) this.px += ux * sp;
+    if (this.fits(this.px, this.py + uy * sp)) this.py += uy * sp;
+
+    // On tourne vers la direction poussée par le plus court chemin.
+    const cible = Math.atan2(-ux, uy);
+    let d = cible - this.heading;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    this.heading += d * Math.min(1, dt * 14);
+    this.facing = facingOf(this.heading);
+    this.player.group.rotation.y = this.heading;
+
+    const moved = Math.hypot(this.px - fromX, this.py - fromY);
+    this.walking = moved > 1e-5;
+    this.player.group.position.set(this.px, Math.abs(Math.sin(this.clock * 9)) * (this.walking ? .04 : 0), this.py);
+    if (!this.walking) return;
+    this.advance(moved);
+  }
+
+  /** Conséquences d'une distance parcourue : pas, herbes hautes, changement de case. */
+  private advance(moved: number) {
+    this.stepDist += moved;
+    if (this.stepDist >= 1) { this.stepDist %= 1; this.hooks.onStep(); }
+
+    const tx = Math.round(this.px), ty = Math.round(this.py);
+    if (this.tileAt(tx, ty) === T.HERBE) {
+      // Un tirage par case parcourue : même fréquence qu'avec l'ancien pas à pas.
+      this.grassDist += moved;
+      if (this.grassDist >= 1) { this.grassDist %= 1; this.hooks.onEncounterTile(); return; }
+    } else this.grassDist = 0;
+
+    const idx = ty * this.map.w + tx;
+    if (idx === this.lastTile) return;
+    this.lastTile = idx;
+    this.onEnterTile(tx, ty);
     this.checkSight();
+  }
+
+  /** Portes et sorties : uniquement au moment où l'on change de case. */
+  private onEnterTile(x: number, y: number) {
+    const exitEnt = this.map.ents.find((e) => e.kind === 'exit' && e.x === x && e.y === y);
+    if (this.tileAt(x, y) === T.PORTE) {
+      const door = this.map.ents.find((e) => e.kind === 'door' && e.x === x && e.y === y);
+      if (door && door.kind === 'door') { this.hooks.onDoor(door.to); return; }
+    }
+    if (exitEnt && exitEnt.kind === 'exit') this.hooks.onExit(exitEnt.to, exitEnt);
   }
 
   private checkSight() {
@@ -939,14 +1243,48 @@ export class Overworld {
       for (let k = 1; k <= e.sight; k++) {
         const cx = e.x + dx * k, cy = e.y + dy * k;
         if (!WALKABLE.has(this.tileAt(cx, cy))) break;
-        if (cx === this.px && cy === this.py) { this.hooks.onTrainerSight(e); return; }
+        if (cx === Math.round(this.px) && cy === Math.round(this.py)) { this.hooks.onTrainerSight(e); return; }
       }
     }
   }
 }
 
+/** Part rognée de chaque bord d'un sol dessiné, pour masquer sa bordure propre. */
+const INSET = .045;
+
+/**
+ * Sols dessinés selon le biome. Là où une image existe, elle remplace le motif
+ * procédural : elle apporte sa propre couleur, donc la teinte de palette est
+ * abandonnée pour cette matière et seule l'occlusion module encore la surface.
+ * Les biomes absents gardent les motifs en niveaux de gris, qui eux se teintent.
+ */
+const SOLS_DESSINES: Record<string, Partial<Record<TileFamily, string>>> = {
+  grotte: { sol: 'roche-brune', herbe: 'roche-brune', chemin: 'roche-brune', roche: 'brique-grise' },
+  volcan: { herbe: 'roche-brune', sol: 'roche-brune', chemin: 'roche-brune', eau: 'lave', roche: 'brique-grise' },
+  // Ni « neige » ni « interieur » : la glace bleue transforme une route enneigée en
+  // lac, et aucun de ces sols n'est un carrelage de bâtiment. Le motif procédural
+  // garde l'avantage de prendre la couleur du biome ou du lieu.
+};
+
+/** Quel dessin de bâtiment employer pour une porte donnée. */
+function nomBatiment(to: string, label: string): string {
+  if (/:center$/.test(to)) return 'centre';
+  if (/:shop$/.test(to)) return 'mart';
+  if (/^gym:/.test(to) || /^league:/.test(to)) return 'arene';
+  if (/bibli|école|ecole|savant|étude/i.test(label)) return 'bibliotheque';
+  if (/phare/i.test(label)) return 'phare';
+  // Les maisons alternent pour éviter des rues entièrement identiques.
+  const n = Number(/house(\d+)$/.exec(to)?.[1] ?? 0);
+  return n % 3 === 1 ? 'bibliotheque' : 'maison';
+}
+
 export function faceAngle(f: number): number {
   return [0, Math.PI / 2, Math.PI, -Math.PI / 2][f] ?? 0;
+}
+
+/** Indice de direction le plus proche d'une orientation continue. */
+export function facingOf(rad: number): number {
+  return ((Math.round(rad / (Math.PI / 2)) % 4) + 4) % 4;
 }
 
 export function entKey(map: GameMap, e: Ent): string {

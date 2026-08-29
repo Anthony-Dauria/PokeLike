@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Species } from '../data/species';
-import { addOutline, buildCreature } from './model';
+import { addOutline, buildCreature, type CreatureRig } from './model';
 
 export type Facing = 'front' | 'back';
 
@@ -23,6 +23,49 @@ export interface PackSprite { tex: THREE.Texture; aspect: number; px: number }
 
 /** Définition de référence d'une planche de sprite (la DS travaillait en 96 px). */
 const FRAME_REF = 96;
+
+/** Dossier d'où provient l'image d'une espèce. */
+type Root = 'sprites' | 'valmore';
+
+interface Manifeste {
+  /** Clés disponibles de face ; `null` = pas de manifeste, on sonde à l'aveugle. */
+  face: Set<string> | null;
+  /** Clés disposant d'une vue de dos ; `null` = inconnu, on tente. */
+  dos: Set<string> | null;
+}
+
+interface RootState {
+  dir: string;
+  manifest: Promise<Manifeste> | null;
+  /** Sondages infructueux consécutifs : au-delà, on cesse de demander. */
+  misses: number;
+  off: boolean;
+}
+
+/** Transfert d'un tampon linéaire lu sur le GPU vers un PNG affichable. */
+function toDataURL(buf: Uint8Array, size: number): string {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  if (!ctx) return '';
+  const img = ctx.createImageData(size, size);
+  // La cible hors écran est linéaire et lue à l'envers : on encode en sRGB et on
+  // retourne verticalement pendant la copie.
+  for (let y = 0; y < size; y++) {
+    const src = (size - 1 - y) * size * 4;
+    const dst = y * size * 4;
+    for (let x = 0; x < size * 4; x += 4) {
+      for (let k = 0; k < 3; k++) {
+        const v = buf[src + x + k] / 255;
+        const e = v <= .0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - .055;
+        img.data[dst + x + k] = Math.round(Math.min(1, Math.max(0, e)) * 255);
+      }
+      img.data[dst + x + 3] = buf[src + x + 3];
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL('image/png');
+}
 
 /** Contexte 2D jetable, hors écran si la plateforme le permet. */
 function ctx2d(w: number, h: number) {
@@ -94,12 +137,21 @@ export class CreatureSprites {
   private cache = new Map<string, Baked>();
   private order: string[] = [];
   private packHit = new Map<string, PackSprite>();
+  /** Vignettes d'interface déjà rendues, indexées par clé. */
+  private portraits = new Map<string, string>();
   private packMiss = new Set<string>();
-  /** Liste éventuelle fournie par le pack ; `null` = pas de manifeste. */
-  private manifest: Promise<Set<number> | null> | null = null;
-  /** Sondages infructueux consécutifs : au-delà, on considère qu'il n'y a pas de pack. */
-  private misses = 0;
-  private packOff = false;
+  /**
+   * Deux dossiers d'images, suivis séparément :
+   *  - `sprites/`, le pack des espèces nationales, que le joueur installe et que
+   *    git ignore ;
+   *  - `valmore/`, les dessins des 9 espèces maison, qui appartiennent au jeu et
+   *    sont versionnés avec lui.
+   * Un dossier vide ne doit pas faire renoncer à l'autre, d'où un état par racine.
+   */
+  private roots: Record<Root, RootState> = {
+    sprites: { dir: './sprites', manifest: null, misses: 0, off: false },
+    valmore: { dir: './valmore', manifest: null, misses: 0, off: false },
+  };
   private scene = new THREE.Scene();
   private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, .01, 100);
 
@@ -195,18 +247,124 @@ export class CreatureSprites {
     return { tex: b.tex, side: b.side, height: b.height };
   }
 
-  /** Lit `sprites/index.json` une seule fois, s'il existe. */
-  private loadManifest(): Promise<Set<number> | null> {
-    this.manifest ??= (async () => {
+  /**
+   * Vignette PNG (data URL) d'un gréement quelconque, pour l'interface. Le rendu
+   * passe par la même cuisson hors écran que les combats : les portraits des menus
+   * montrent donc exactement le modèle du jeu, sans dessin séparé à maintenir.
+   *
+   * `bust` cadre la tête et les épaules ; sinon on prend la silhouette entière.
+   */
+  portrait(key: string, make: () => CreatureRig, bust = false, size = 96): string {
+    const k = `${key}|${bust ? 'b' : 'f'}|${size}`;
+    const hit = this.portraits.get(k);
+    if (hit) return hit;
+
+    const rig = make();
+    this.scene.add(rig.group);
+    const box = new THREE.Box3().setFromObject(rig.group);
+    const taille = new THREE.Vector3(), centre = new THREE.Vector3();
+    box.getSize(taille); box.getCenter(centre);
+
+    let cote: number;
+    if (bust) {
+      // Buste : carré calé sur le haut de la silhouette, assez serré pour que le
+      // visage soit lisible dans une vignette de 78 px.
+      cote = Math.max(taille.x * 1.12, taille.y * .40) || 1;
+      centre.y = box.max.y - cote * .46;
+    } else {
+      cote = Math.max(taille.x, taille.y, taille.z) * 1.12 || 1;
+      centre.y = box.min.y + cote / 2 - cote * .04;
+    }
+    addOutline(rig, cote * .018);
+
+    const dir = new THREE.Vector3(.26, .1, 1).normalize();
+    this.cam.left = -cote / 2; this.cam.right = cote / 2;
+    this.cam.top = cote / 2; this.cam.bottom = -cote / 2;
+    this.cam.near = .01; this.cam.far = cote * 8;
+    this.cam.position.copy(centre).addScaledVector(dir, cote * 3);
+    this.cam.lookAt(centre);
+    this.cam.updateProjectionMatrix();
+
+    const cible = new THREE.WebGLRenderTarget(size, size, {
+      minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+      format: THREE.RGBAFormat, samples: 0, depthBuffer: true,
+    });
+    cible.texture.colorSpace = THREE.LinearSRGBColorSpace;
+
+    const prevCible = this.gl.getRenderTarget();
+    const prevAlpha = this.gl.getClearAlpha();
+    const prevCol = new THREE.Color();
+    this.gl.getClearColor(prevCol);
+    this.gl.setRenderTarget(cible);
+    this.gl.setClearColor(0x000000, 0);
+    this.gl.clear(true, true, false);
+    this.gl.render(this.scene, this.cam);
+
+    const buf = new Uint8Array(size * size * 4);
+    this.gl.readRenderTargetPixels(cible, 0, 0, size, size, buf);
+    this.gl.setRenderTarget(prevCible);
+    this.gl.setClearColor(prevCol, prevAlpha);
+    this.scene.remove(rig.group);
+    cible.dispose();
+
+    const url = toDataURL(buf, size);
+    this.portraits.set(k, url);
+    return url;
+  }
+
+  /**
+   * Où chercher l'image d'une espèce, et sous quel nom de fichier. Les espèces
+   * maison portent leur identifiant (brasillon.png), plus lisible à la main que
+   * leur numéro ; les autres gardent leur numéro national.
+   */
+  private locate(sp: Species): { st: RootState; key: string } {
+    return sp.custom
+      ? { st: this.roots.valmore, key: sp.id }
+      : { st: this.roots.sprites, key: String(sp.dex) };
+  }
+
+  /**
+   * Lit `<dossier>/index.json` une seule fois, s'il existe. Le champ `back` permet
+   * de dire quelles espèces ont une vue de dos : sans lui, chaque combat tente un
+   * fichier absent et laisse une erreur 404 dans la console.
+   */
+  private loadManifest(st: RootState): Promise<Manifeste> {
+    st.manifest ??= (async () => {
+      const vide: Manifeste = { face: null, dos: null };
       try {
-        const res = await fetch('./sprites/index.json', { cache: 'force-cache' });
-        if (!res.ok) return null;
+        const res = await fetch(`${st.dir}/index.json`, { cache: 'force-cache' });
+        if (!res.ok) return vide;
         const raw: unknown = await res.json();
-        const list = Array.isArray(raw) ? raw : (raw as { dex?: number[] })?.dex;
-        return Array.isArray(list) ? new Set(list.map(Number)) : null;
-      } catch { return null; }
+        const obj = raw as { dex?: unknown[]; ids?: unknown[]; back?: unknown[] } | unknown[];
+        const list = Array.isArray(obj) ? obj : [...(obj?.dex ?? []), ...(obj?.ids ?? [])];
+        const dos = Array.isArray(obj) ? undefined : obj?.back;
+        return {
+          face: Array.isArray(list) && list.length ? new Set(list.map(String)) : null,
+          dos: Array.isArray(dos) ? new Set(dos.map(String)) : null,
+        };
+      } catch { return vide; }
     })();
-    return this.manifest;
+    return st.manifest;
+  }
+
+  /**
+   * Chemin de l'image de face d'un pack, ou `null`. Sert aux vignettes de
+   * l'interface, qui ont besoin d'une URL et non d'une texture.
+   */
+  async packUrl(sp: Species): Promise<string | null> {
+    const { st, key } = this.locate(sp);
+    if (st.off) return null;
+    const man = await this.loadManifest(st);
+    if (man.face && !man.face.has(key)) return null;
+    const path = `${st.dir}/${key}.png`;
+    if (this.packHit.has(path)) return path;
+    if (this.packMiss.has(path)) return null;
+    try {
+      const res = await fetch(path, { cache: 'force-cache' });
+      if (res.ok && (res.headers.get('content-type') ?? '').startsWith('image/')) return path;
+    } catch { /* pas de pack */ }
+    this.packMiss.add(path);
+    return null;
   }
 
   /**
@@ -214,12 +372,16 @@ export class CreatureSprites {
    * `back/<dex>.png` est optionnel : on retombe sur la vue de face.
    */
   async pack(sp: Species, facing: Facing): Promise<PackSprite | null> {
-    if (sp.custom || this.packOff) return null;    // espèces maison : pas de pack attendu
-    const listed = await this.loadManifest();
-    if (listed && !listed.has(sp.dex)) return null;
-    for (const path of facing === 'back'
-      ? [`./sprites/back/${sp.dex}.png`, `./sprites/${sp.dex}.png`]
-      : [`./sprites/${sp.dex}.png`]) {
+    const { st, key } = this.locate(sp);
+    if (st.off) return null;
+    const man = await this.loadManifest(st);
+    if (man.face && !man.face.has(key)) return null;
+    // Vue de dos : on ne la demande que si le manifeste la déclare, ou faute de
+    // manifeste. Sinon on passe directement à la vue de face.
+    const avecDos = facing === 'back' && (!man.dos || man.dos.has(key));
+    for (const path of avecDos
+      ? [`${st.dir}/back/${key}.png`, `${st.dir}/${key}.png`]
+      : [`${st.dir}/${key}.png`]) {
       const hit = this.packHit.get(path);
       if (hit) return hit;
       if (this.packMiss.has(path)) continue;
@@ -229,7 +391,7 @@ export class CreatureSprites {
         if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
           this.packMiss.add(path);
           // Sans manifeste, trois échecs d'affilée signifient « aucun pack installé ».
-          if (!listed && ++this.misses >= 3) this.packOff = true;
+          if (!man.face && ++st.misses >= 3) st.off = true;
           continue;
         }
         const { bmp, aspect, px, frame, flipped } = await prepare(await createImageBitmap(await res.blob()));
@@ -247,11 +409,11 @@ export class CreatureSprites {
         tex.userData.src = 'pack';
         const hit: PackSprite = { tex, aspect, px };
         this.packHit.set(path, hit);
-        this.misses = 0;
+        st.misses = 0;
         return hit;
       } catch {
         this.packMiss.add(path);
-        if (!listed && ++this.misses >= 3) this.packOff = true;
+        if (!man.face && ++st.misses >= 3) st.off = true;
       }
     }
     return null;
@@ -260,6 +422,7 @@ export class CreatureSprites {
   dispose() {
     for (const b of this.cache.values()) b.target?.dispose();
     for (const p of this.packHit.values()) p.tex.dispose();
+    this.portraits.clear();
     this.cache.clear();
     this.order = [];
   }

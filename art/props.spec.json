@@ -1,0 +1,122 @@
+{
+  "out": "public/monde/props",
+  "tight": true,
+  "scale": 1,
+  "pad": 1,
+  "dark": true,
+  "bgSeuil": 40,
+  "items": [
+    {
+      "name": "casier",
+      "x": 202,
+      "y": 921,
+      "w": 37,
+      "h": 35
+    },
+    {
+      "name": "machine",
+      "x": 249,
+      "y": 921,
+      "w": 22,
+      "h": 35
+    },
+    {
+      "name": "etagere",
+      "x": 280,
+      "y": 920,
+      "w": 20,
+      "h": 36
+    },
+    {
+      "name": "tapis",
+      "x": 336,
+      "y": 921,
+      "w": 17,
+      "h": 35
+    },
+    {
+      "name": "distributeur",
+      "x": 362,
+      "y": 919,
+      "w": 27,
+      "h": 37
+    },
+    {
+      "name": "plante",
+      "x": 396,
+      "y": 920,
+      "w": 23,
+      "h": 36
+    },
+    {
+      "name": "plante-2",
+      "x": 427,
+      "y": 917,
+      "w": 23,
+      "h": 39
+    },
+    {
+      "name": "caisses",
+      "x": 458,
+      "y": 915,
+      "w": 76,
+      "h": 41
+    },
+    {
+      "name": "mur-pierre",
+      "x": 902,
+      "y": 920,
+      "w": 45,
+      "h": 36
+    },
+    {
+      "name": "gargouille",
+      "x": 1067,
+      "y": 895,
+      "w": 30,
+      "h": 61
+    },
+    {
+      "name": "pepite",
+      "x": 1173,
+      "y": 934,
+      "w": 23,
+      "h": 22
+    },
+    {
+      "name": "cristal-amas",
+      "x": 1278,
+      "y": 926,
+      "w": 23,
+      "h": 30
+    },
+    {
+      "name": "cristal-bleu",
+      "x": 1415,
+      "y": 940,
+      "w": 15,
+      "h": 16
+    },
+    {
+      "name": "cristal-cyan",
+      "x": 1434,
+      "y": 925,
+      "w": 22,
+      "h": 31
+    },
+    {
+      "name": "cristal-violet",
+      "x": 1459,
+      "y": 926,
+      "w": 23,
+      "h": 30
+    },
+    {
+      "name": "torche",
+      "x": 1491,
+      "y": 904,
+      "w": 31,
+      "h": 52
+    }
+  ]
+}

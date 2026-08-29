@@ -1,0 +1,44 @@
+{
+  "out": "public/monde", "tight": true, "scale": 1, "pad": 2,
+  "items": [
+    { "name": "centre",       "x": 29,   "y": 62,   "w": 210, "h": 207 },
+    { "name": "mart",         "x": 252,  "y": 88,   "w": 199, "h": 181 },
+    { "name": "maison",       "x": 461,  "y": 59,   "w": 217, "h": 210 },
+    { "name": "arene",        "x": 693,  "y": 36,   "w": 257, "h": 233 },
+    { "name": "bibliotheque", "x": 976,  "y": 51,   "w": 232, "h": 218 },
+    { "name": "phare",        "x": 1222, "y": 9,    "w": 149, "h": 260 },
+
+    { "name": "arbre-clair",  "x": 910,  "y": 989,  "w": 80,  "h": 111 },
+    { "name": "arbre-fonce",  "x": 1005, "y": 989,  "w": 83,  "h": 111 },
+    { "name": "sapin",        "x": 1105, "y": 988,  "w": 77,  "h": 110 },
+    { "name": "buisson",      "x": 1197, "y": 1051, "w": 46,  "h": 43 },
+    { "name": "pousse",       "x": 1259, "y": 1036, "w": 41,  "h": 57 },
+    { "name": "rocher",       "x": 1315, "y": 1046, "w": 58,  "h": 49 },
+
+    { "name": "boite-lettres","x": 35,   "y": 622,  "w": 41,  "h": 80 },
+    { "name": "affichage",    "x": 112,  "y": 611,  "w": 81,  "h": 91 },
+    { "name": "lampadaire",   "x": 226,  "y": 602,  "w": 32,  "h": 103 },
+    { "name": "lampadaire-vert","x": 356,"y": 622,  "w": 31,  "h": 83 },
+    { "name": "enseigne",     "x": 420,  "y": 621,  "w": 65,  "h": 83 },
+    { "name": "barriere",     "x": 518,  "y": 661,  "w": 75,  "h": 42 },
+    { "name": "banc",         "x": 627,  "y": 639,  "w": 96,  "h": 65 },
+    { "name": "poubelle",     "x": 758,  "y": 642,  "w": 47,  "h": 63 },
+    { "name": "jardiniere",   "x": 836,  "y": 642,  "w": 81,  "h": 63 },
+    { "name": "velo",         "x": 945,  "y": 643,  "w": 86,  "h": 62 },
+    { "name": "palissade",    "x": 1062, "y": 650,  "w": 106, "h": 52 },
+    { "name": "tombe",        "x": 1200, "y": 640,  "w": 66,  "h": 65 },
+    { "name": "statue",       "x": 1290, "y": 604,  "w": 92,  "h": 101 },
+
+    { "name": "panneau",      "x": 21,   "y": 749,  "w": 60,  "h": 54 },
+    { "name": "panneau-2",    "x": 190,  "y": 749,  "w": 61,  "h": 55 },
+    { "name": "borne",        "x": 363,  "y": 737,  "w": 30,  "h": 67 },
+    { "name": "caillou",      "x": 451,  "y": 753,  "w": 54,  "h": 50 },
+    { "name": "rochers",      "x": 539,  "y": 744,  "w": 66,  "h": 60 },
+    { "name": "buche",        "x": 726,  "y": 761,  "w": 71,  "h": 40 },
+    { "name": "souche",       "x": 827,  "y": 751,  "w": 68,  "h": 55 },
+    { "name": "fleurs-rouges","x": 1029, "y": 749,  "w": 55,  "h": 55 },
+    { "name": "fleurs-blanches","x": 1112,"y": 750, "w": 55,  "h": 54 },
+    { "name": "fleurs-bleues","x": 1239, "y": 754,  "w": 34,  "h": 49 },
+    { "name": "buisson-large","x": 1298, "y": 743,  "w": 74,  "h": 60 }
+  ]
+}

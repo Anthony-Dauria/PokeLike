@@ -1,6 +1,7 @@
 import { TYPE_COLOR } from '../data/types';
 import { ITEMS, item as getItem, type Item } from '../data/items';
-import { DEX, species, type Species } from '../data/species';
+import { DEX, evoLine, species, type Species } from '../data/species';
+import { creaturePortrait, humanPortrait, packPortrait, type HumanId } from './portraits';
 import { move as getMove } from '../data/moves';
 import { STATUS_LABEL } from '../data/moves';
 import { GYMS } from '../data/world';
@@ -10,9 +11,8 @@ import { audio } from '../engine/audio';
 import { ask, card, closeOverlay, hpColor, openOverlay, say, section, toast, typeChip } from './ui';
 
 /* -------------------- vignette d'espèce -------------------- */
-export function portrait(spId: string, shiny = false): HTMLElement {
-  const sp = species(spId);
-  // Mêmes couleurs que le modèle 3D pour que la vignette « ressemble » à la créature.
+/** Carré coloré affiché tant qu'aucune image n'est disponible. */
+function initiales(sp: Species): HTMLElement {
   const a = sp.body ?? TYPE_COLOR[sp.types[0]];
   const b = sp.accent ?? TYPE_COLOR[sp.types[1] ?? sp.types[0]];
   const d = document.createElement('div');
@@ -26,9 +26,47 @@ export function portrait(spId: string, shiny = false): HTMLElement {
   d.style.color = '#0b1420';
   d.style.textShadow = '0 1px 0 rgba(255,255,255,.35)';
   d.textContent = sp.name.slice(0, 2);
-  if (shiny) d.style.boxShadow = '0 0 10px #ffd166 inset, 0 0 8px #ffd166';
   return d;
 }
+
+/**
+ * Vignette d'une créature. On montre le modèle du jeu, cuit hors écran, et on le
+ * remplace par l'image du pack si le joueur en a déposé une. Le carré à initiales
+ * ne sert plus que de secours quand le rendu n'est pas encore disponible.
+ */
+export function portrait(spId: string, shiny = false): HTMLElement {
+  const sp = species(spId);
+  const url = creaturePortrait(spId, shiny);
+  if (!url) return initiales(sp);
+
+  const img = document.createElement('img');
+  img.className = 'sprite';
+  img.src = url;
+  img.alt = sp.name;
+  img.decoding = 'async';
+  img.style.objectFit = 'contain';
+  img.style.imageRendering = 'pixelated';
+  if (shiny) img.style.filter = 'drop-shadow(0 0 4px #ffd166)';
+  void packPortrait(spId).then((p) => { if (p) img.src = p; });
+  return img;
+}
+
+/** Buste d'un personnage humain (joueur, professeur, rival). */
+export function bust(id: HumanId): HTMLElement {
+  const url = humanPortrait(id);
+  const d = document.createElement(url ? 'img' : 'div');
+  d.className = 'sprite';
+  if (url) {
+    (d as HTMLImageElement).src = url;
+    (d as HTMLImageElement).alt = '';
+    d.style.objectFit = 'contain';
+    d.style.imageRendering = 'pixelated';
+  } else {
+    d.style.background = 'linear-gradient(135deg,#8fb8e8,#4f6f9f)';
+  }
+  return d;
+}
+
 
 function monRow(m: Mon, el: HTMLElement) {
   el.append(portrait(m.sp, m.shiny));
@@ -363,6 +401,53 @@ export function evolutionLine(sp: Species): string | null {
     : `Évolution au niveau ${sp.evo.lv} → ${noms[0]}`;
 }
 
+/**
+ * Chaîne évolutive complète, en vignettes. Le niveau de chaque passage est
+ * toujours donné ; l'espèce suivante reste masquée tant qu'elle n'a pas été
+ * croisée, pour ne pas dévoiler la surprise.
+ */
+export function evolutionChainView(sp: Species): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'card evo-chain';
+
+  const ligne = evoLine(sp.id);
+  if (ligne.length < 2) {
+    box.style.display = 'block';
+    box.innerHTML = '<div class="sub" style="margin:0">Espèce sans évolution connue.</div>';
+    return box;
+  }
+
+  const known = (id: string) => state.caught.has(id) || state.seen.has(id) || id === sp.id;
+  ligne.forEach((id, i) => {
+    if (i > 0) {
+      const lv = species(ligne[i - 1]).evo?.lv;
+      const fleche = document.createElement('div');
+      fleche.className = 'evo-arrow';
+      fleche.innerHTML = `<span>▸</span><b>N.${lv ?? '?'}</b>`;
+      box.append(fleche);
+    }
+    const etape = document.createElement('div');
+    etape.className = 'evo-step';
+    if (known(id)) {
+      etape.append(portrait(id));
+      const n = document.createElement('span');
+      n.textContent = species(id).name;
+      etape.append(n);
+    } else {
+      const inconnu = document.createElement('div');
+      inconnu.className = 'sprite evo-unknown';
+      inconnu.textContent = '?';
+      etape.append(inconnu);
+      const n = document.createElement('span');
+      n.textContent = '???';
+      etape.append(n);
+    }
+    if (id === sp.id) etape.classList.add('evo-here');
+    box.append(etape);
+  });
+  return box;
+}
+
 /** Fiche détaillée d'une espèce du Dex. */
 export function openDexEntry(sp: Species, back?: () => void) {
   const caught = state.caught.has(sp.id);
@@ -379,18 +464,20 @@ export function openDexEntry(sp: Species, back?: () => void) {
     g.append(r);
     const sub = document.createElement('div');
     sub.className = 'sub';
-    sub.textContent = `Génération ${sp.gen || '—'} · ${caught ? 'capturé' : 'aperçu seulement'}`;
+    // Les exclusivités n'ont pas de génération nationale : on nomme la région.
+    const origine = sp.custom ? 'Exclusivité de Valmore' : `Génération ${sp.gen || '—'}`;
+    sub.textContent = `${origine} · ${caught ? 'capturé' : 'aperçu seulement'}`;
     g.append(sub);
     head.append(g);
     body.append(head);
 
     body.append(section('Évolution'));
-    const evoBox = document.createElement('div');
-    evoBox.className = 'card';
-    evoBox.style.display = 'block';
-    const line = evolutionLine(sp);
-    evoBox.innerHTML = `<div class="sub" style="margin:0">${line ?? 'Capturez cette espèce pour connaître son évolution.'}</div>`;
-    body.append(evoBox);
+    body.append(caught
+      ? evolutionChainView(sp)
+      : card((c) => {
+        c.style.display = 'block';
+        c.innerHTML = '<div class="sub" style="margin:0">Capturez cette espèce pour connaître son évolution.</div>';
+      }));
 
     if (caught) {
       body.append(section('Statistiques de base'));

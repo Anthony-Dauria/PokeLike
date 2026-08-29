@@ -623,20 +623,28 @@ function shiftHue(hex: string, amt: number): number {
 }
 
 /* ---------------- personnages ---------------- */
-export function buildHuman(shirt: number, skin = 0xf2c9a0, hair = 0x3a2a20, cap?: number): CreatureRig {
+/**
+ * Personnage humain. `long` allonge la chevelure et affine la silhouette : c'est
+ * ce qui distingue les deux apparences du joueur, sans dupliquer le modèle.
+ */
+export function buildHuman(shirt: number, skin = 0xf2c9a0, hair = 0x3a2a20, cap?: number, long = false): CreatureRig {
   const g = new THREE.Group();
   const bob: THREE.Object3D[] = [];
   const limbs: THREE.Object3D[] = [];
   const body = mat(shirt), sk = mat(skin), hr = mat(hair);
   const pants = mat(0x2c3e57), shoe = mat(0x1d2634);
 
-  const torso = part(CAPSULE_R, body, [0, .55, 0], [.19, .1, .15]);
+  const torso = part(CAPSULE_R, body, [0, .55, 0], [long ? .173 : .19, .1, long ? .137 : .15]);
   g.add(torso); bob.push(torso);
   g.add(part(BOX_R, mat(0x22304a), [0, .38, 0], [.34, .08, .25]));           // ceinture
   const head = part(SPHERE_R, sk, [0, .89, 0], [.2, .21, .2]);
   g.add(head); bob.push(head);
   g.add(part(SPHERE_R, hr, [0, .95, -.03], [.205, .14, .205]));              // cheveux
   g.add(part(SPHERE_R, hr, [0, .87, -.16], [.17, .13, .1]));                 // nuque
+  if (long) {
+    g.add(part(CAPSULE_R, hr, [0, .72, -.17], [.15, .13, .09]));             // chevelure longue
+    for (const s2 of [-1, 1]) g.add(part(CAPSULE_R, hr, [s2 * .17, .8, -.05], [.055, .1, .055]));
+  }
   if (cap !== undefined) {
     g.add(part(SPHERE_R, mat(cap), [0, .99, -.01], [.222, .14, .222]));
     g.add(part(BOX_R, mat(cap), [0, .965, .18], [.2, .03, .16]));            // visière

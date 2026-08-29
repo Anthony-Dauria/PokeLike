@@ -1,5 +1,7 @@
 import { TYPE_COLOR, type TypeName } from '../data/types';
 import { audio } from '../engine/audio';
+import { RIVAL_NAME } from '../data/world';
+import { humanPortrait, type HumanId } from './portraits';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
@@ -7,6 +9,9 @@ const dlg = $('#dialogue');
 const dlgText = $('#dlg-text') as HTMLParagraphElement;
 const dlgChoices = $('#dlg-choices');
 const dlgNext = $('#dlg-next');
+const dlgSpeaker = $('#dlg-speaker');
+const dlgFace = $('#dlg-face') as HTMLImageElement;
+const dlgName = $('#dlg-name');
 const overlay = $('#overlay');
 const toastEl = $('#toast');
 const fadeEl = $('#fade');
@@ -21,6 +26,44 @@ export const ui = {
 };
 
 /* ------------------------------------------------------------------ */
+/**
+ * Les répliques du jeu s'écrivent « Nom : texte ». On en tire l'interlocuteur pour
+ * l'afficher en buste au-dessus de la boîte — sans lui, on ne voyait jamais qui
+ * parlait. Le préfixe doit rester court et commencer par une majuscule, sinon on
+ * prendrait pour un nom la ponctuation d'une phrase ordinaire.
+ */
+function splitSpeaker(line: string): { who: string | null; text: string } {
+  const m = /^([A-ZÀ-Ý][^:]{0,27}?)\s:\s([\s\S]+)$/.exec(line);
+  return m ? { who: m[1], text: m[2] } : { who: null, text: line };
+}
+
+/** Quel personnage se cache derrière le nom affiché. */
+function idFor(who: string): HumanId {
+  if (/^(pr\.|prof)/i.test(who)) return 'prof';
+  if (who === RIVAL_NAME) return 'rival';
+  return 'pnj';
+}
+
+/**
+ * Dessins fournis pour certains personnages. Ils l'emportent sur le modèle 3D
+ * cuit à la volée ; si le fichier manque, `onerror` fait le repli tout seul.
+ */
+const DESSINS: Partial<Record<HumanId, string>> = {
+  prof: './valmore/prof-buste.png',
+};
+
+/** Met à jour la plaque d'interlocuteur ; la masque pour une narration. */
+function showSpeaker(who: string | null) {
+  if (!who) { dlgSpeaker.hidden = true; return; }
+  const id = idFor(who);
+  const dessin = DESSINS[id];
+  dlgName.textContent = who;
+  dlgFace.onerror = () => { dlgFace.onerror = null; dlgFace.src = humanPortrait(id); };
+  dlgFace.src = dessin ?? humanPortrait(id);
+  dlgFace.hidden = false;
+  dlgSpeaker.hidden = false;
+}
+
 function typewriter(text: string) {
   fullText = text;
   dlgText.textContent = '';
@@ -44,21 +87,25 @@ export function say(text: string | string[]): Promise<void> {
 }
 
 function sayOne(line: string): Promise<void> {
+  const { who, text } = splitSpeaker(line);
   return new Promise((resolve) => {
     dlg.hidden = false;
     dlgChoices.innerHTML = '';
     dlgNext.style.display = '';
-    typewriter(line);
+    showSpeaker(who);
+    typewriter(text);
     waiting = () => { waiting = null; dlg.hidden = true; resolve(); };
   });
 }
 
 /** Question à choix multiples. Renvoie l'index choisi. */
 export function ask(text: string, choices: string[]): Promise<number> {
+  const parts = splitSpeaker(text);
   return new Promise((resolve) => {
     dlg.hidden = false;
     dlgNext.style.display = 'none';
-    typewriter(text);
+    showSpeaker(parts.who);
+    typewriter(parts.text);
     dlgChoices.innerHTML = '';
     choices.forEach((c, i) => {
       const b = document.createElement('button');

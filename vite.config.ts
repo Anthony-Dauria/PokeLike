@@ -12,15 +12,20 @@ export default defineConfig({
         // Le pack de sprites est volontairement hors du pré-cache : quelques
         // centaines de PNG rallongeraient l'installation alors qu'ils ne servent
         // qu'au fil des rencontres.
-        globPatterns: ['**/*.{js,css,html,svg,woff2}', 'icons/*.png'],
+        // Les dessins de Valmore font partie du jeu, comme les icônes : ils sont
+        // pré-cachés pour qu'une première partie hors ligne montre les starters.
+        globPatterns: ['**/*.{js,css,html,svg,woff2}', 'icons/*.png', 'valmore/*.png', 'monde/*.png', 'monde/sols/*.png', 'monde/props/*.png'],
         globIgnores: ['**/sprites/**'],
+
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/\/sprites\//],
         runtimeCaching: [{
           // Chaque sprite réellement affiché est gardé : la partie reste jouable
           // hors ligne, sprites compris, une fois les espèces rencontrées.
-          urlPattern: ({ url }) => url.pathname.includes('/sprites/'),
+          // Les scènes de pièces (public/monde/scenes) pèsent trop pour le pré-cache :
+          // elles sont gardées à la première visite, comme les packs de sprites.
+          urlPattern: ({ url }) => url.pathname.includes('/sprites/') || url.pathname.includes('/monde/scenes/'),
           handler: 'CacheFirst',
           options: {
             cacheName: 'pokelike-sprites',
