@@ -40,10 +40,14 @@ public/sprites/index.json      → { "dex": [1, 2, 3, …] }  (facultatif mais c
 ```
 
 - Si `back/<n>.png` est absent, la vue de face est réutilisée.
-- Les tailles autour de 96×96 à 256×256 conviennent ; le rendu est en plus proche
-  voisin, donc les sprites pixel art restent nets.
-- Les images sont **rognées automatiquement** sur leurs pixels opaques, puis mises à
-  l'échelle de la créature : une marge vide dans le PNG ne fait plus flotter le sprite.
+- **Les planches de 96×96 donnent le rendu le plus fidèle** : c'est la définition de
+  l'ère DS, et le jeu affiche alors un texel du sprite par pixel de son rendu interne.
+  Les planches plus grandes (128, 256…) fonctionnent aussi : elles sont ramenées à
+  cette échelle et filtrées pour ne pas scintiller.
+- Les images sont **rognées** sur leurs pixels opaques, puis dimensionnées d'après la
+  taille du sujet en pixels — pas d'après le modèle 3D. Une créature dessinée petite
+  reste petite, une grande remplit sa plateforme, et les pieds touchent le sol.
+  Le cadrage se recalcule tout seul quand l'écran change de taille ou d'orientation.
 - `index.json` évite des requêtes inutiles ; sans lui, trois échecs d'affilée
   suffisent à conclure qu'aucun pack n'est installé.
 - Le chargement est paresseux : seule une espèce réellement rencontrée est demandée,

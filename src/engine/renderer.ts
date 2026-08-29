@@ -37,13 +37,15 @@ const PIXEL_VERT = /* glsl */`
   void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
 `;
 
+/** Côté court du rendu interne en mode DS (la console affichait 192 px). */
+export const DS_SHORT = 232;
+
 export class Renderer {
   readonly gl: THREE.WebGLRenderer;
   readonly camera: THREE.PerspectiveCamera;
   quality: Quality = 'haut';
   style: Style = 'ds';
-  /** Côté court du rendu interne en mode DS (la console affichait 192 px). */
-  pixelShort = 232;
+  pixelShort = DS_SHORT;
   private target: THREE.WebGLRenderTarget | null = null;
   private quad: THREE.Mesh | null = null;
   private quadScene = new THREE.Scene();

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { addOutline, animateRig, buildCreature, buildHuman, type CreatureRig } from '../creature/model';
 import { CreatureSprites, type Facing } from '../creature/sprites';
 import type { Species } from '../data/species';
-import { addLights, addSky, disposeObject, disposeScene, toonGradient, uTime, windify } from '../engine/renderer';
+import { addLights, addSky, disposeObject, disposeScene, DS_SHORT, toonGradient, uTime, windify } from '../engine/renderer';
 import { spOf, type Mon } from '../game/mon';
 import { TYPE_COLOR } from '../data/types';
 import { RNG } from '../engine/rng';
@@ -33,12 +33,38 @@ const ARENA: Record<string, Arena> = {
   interieur: { skyTop: 0x232a3c, skyMid: 0x323a52, skyLow: 0x4d566f, ground: 0xa1815f, platform: 0x8d7050, platformTop: 0xbe9a70, scatter: 0x6b5240, scatter2: 0x7d6250, décor: 'roche', fog: 0x3a4157, light: 0xffe9c8 },
 };
 
+const TMP = new THREE.Vector3();
+
+/**
+ * Agrandissement des sprites de pack. À l'échelle exacte (un texel = un pixel du
+ * rendu interne) les créatures sont justes entre elles mais perdues sur les
+ * plateformes : le cadrage du jeu montre bien plus de décor que l'écran 256×192
+ * de la console. Ce facteur rend à une planche de 96 px la place qu'elle occupait
+ * sur la DS. Choisi entier et demi pour garder des pixels réguliers.
+ */
+const SPRITE_ZOOM = 1.5;
+
+/** Sprite de pack dont la taille suit la définition du rendu, pas le modèle 3D. */
+interface PackFit {
+  mesh: THREE.Mesh;
+  /** Hauteur du sujet en pixels, ramenée à une planche de 96 px. */
+  px: number;
+  aspect: number;
+  who: 'mine' | 'foe';
+  /** Hauteur du modèle 3D, utilisée tant que la caméra n'a pas servi. */
+  fallback: number;
+}
+
 export class BattleScene {
   scene = new THREE.Scene();
   private mineRig: CreatureRig | null = null;
   private foeRig: CreatureRig | null = null;
   private mineShadow: THREE.Mesh | null = null;
   private foeShadow: THREE.Mesh | null = null;
+  /** Sprites de pack en attente de mise à l'échelle « un texel = un pixel DS ». */
+  private fits: PackFit[] = [];
+  /** Unités monde par pixel DS, à la profondeur de chaque plateforme. */
+  private wpp = { mine: 0, foe: 0 };
   private minePos = new THREE.Vector3(-0.35, 0, 0.3);
   private foePos = new THREE.Vector3(1.5, 0, -3.4);
   private t = 0;
@@ -58,7 +84,7 @@ export class BattleScene {
    * Construit le combattant : sprite plat (cuit depuis le modèle, ou image du pack
    * déposé par le joueur) ou modèle 3D selon le réglage.
    */
-  private makeCreature(sp: Species, shiny: boolean, facing: Facing): CreatureRig {
+  private makeCreature(sp: Species, shiny: boolean, facing: Facing, who: 'mine' | 'foe'): CreatureRig {
     if (this.mode === '3d' || !this.sprites) {
       const rig = buildCreature(sp, shiny);
       addOutline(rig, .05);
@@ -80,13 +106,16 @@ export class BattleScene {
       // Les packs ont souvent un liseré semi-transparent : un seuil plus bas le garde.
       mat.alphaTest = .2;
       mat.needsUpdate = true;
-      // L'image est recadrée sur la créature : on redonne au panneau la hauteur du
-      // modèle et son propre rapport, sinon le sprite flotte ou paraît écrasé.
-      const w = height * p.aspect;
-      const plan = new THREE.PlaneGeometry(w, height);
-      plan.translate(0, height / 2, 0);
+      // Panneau unitaire posé au sol : `fit()` lui donne ensuite sa taille réelle,
+      // calculée pour qu'un pixel du sprite couvre un pixel du rendu interne.
+      const plan = new THREE.PlaneGeometry(p.aspect, 1);
+      plan.translate(0, .5, 0);
       mesh.geometry.dispose();
       mesh.geometry = plan;
+      const fit: PackFit = { mesh, px: p.px, aspect: p.aspect, who, fallback: height };
+      this.fits = this.fits.filter((f) => f.who !== who);
+      this.fits.push(fit);
+      this.fit(fit);
     });
     return { group, bob: [mesh], limbs: [], height: side };
   }
@@ -100,6 +129,7 @@ export class BattleScene {
     disposeScene(this.scene);
     this.scene = new THREE.Scene();
     this.mineRig = null; this.foeRig = null; this.trainer = null;
+    this.fits = [];
     this.mineShadow = null; this.foeShadow = null;
     this.fx = [];
 
@@ -241,8 +271,9 @@ export class BattleScene {
 
   setFoe(foe: Mon, isTrainer: boolean) {
     if (this.foeRig) { this.scene.remove(this.foeRig.group); disposeObject(this.foeRig.group); }
+    this.fits = this.fits.filter((f) => f.who !== 'foe');
     const sp = spOf(foe);
-    this.foeRig = this.makeCreature(sp, foe.shiny, 'front');
+    this.foeRig = this.makeCreature(sp, foe.shiny, 'front', 'foe');
     this.foeRig.group.scale.multiplyScalar(battleZoom(sp.scale));
     this.foeRig.group.position.copy(this.foePos);
     this.foeRig.group.position.y = .4;
@@ -264,8 +295,9 @@ export class BattleScene {
 
   setMine(mine: Mon) {
     if (this.mineRig) { this.scene.remove(this.mineRig.group); disposeObject(this.mineRig.group); }
+    this.fits = this.fits.filter((f) => f.who !== 'mine');
     const sp = spOf(mine);
-    this.mineRig = this.makeCreature(sp, mine.shiny, 'back');
+    this.mineRig = this.makeCreature(sp, mine.shiny, 'back', 'mine');
     this.mineRig.group.scale.multiplyScalar(battleZoom(sp.scale));
     this.mineRig.group.position.copy(this.minePos);
     this.mineRig.group.position.y = .4;
@@ -377,6 +409,36 @@ export class BattleScene {
     }
   }
 
+  /**
+   * Unités monde couvertes par un pixel du rendu interne, à la profondeur de la
+   * plateforme visée. C'est ce qui permet d'afficher un sprite à sa taille
+   * native : un texel pour un pixel, comme sur la console.
+   */
+  private density(cam: THREE.PerspectiveCamera, at: THREE.Vector3) {
+    const dir = new THREE.Vector3();
+    cam.getWorldDirection(dir);
+    const depth = Math.max(.5, TMP.subVectors(at, cam.position).dot(dir));
+    const visH = 2 * depth * Math.tan((cam.fov * Math.PI) / 360);
+    // Le côté court du rendu interne fait DS_SHORT pixels, comme dans Renderer.
+    return (cam.aspect < 1 ? visH * cam.aspect : visH) / DS_SHORT;
+  }
+
+  /**
+   * Donne au panneau sa taille définitive. Le groupe porte déjà le zoom de combat :
+   * on le divise, sinon une grosse espèce compterait sa taille deux fois — une fois
+   * par les pixels de son sprite, une fois par le zoom.
+   */
+  private fit(f: PackFit) {
+    const wpp = this.wpp[f.who];
+    const h = wpp > 0 ? f.px * wpp * SPRITE_ZOOM : f.fallback;
+    const rig = this.rig(f.who);
+    const base = (rig?.group.userData.baseScale as number) || rig?.group.scale.x || 1;
+    f.mesh.scale.setScalar(h / base);
+    // L'ombre n'est pas fille du groupe : elle se règle en unités monde.
+    const shadow = f.who === 'mine' ? this.mineShadow : this.foeShadow;
+    if (shadow) shadow.scale.setScalar(Math.max(.35, h * f.aspect * .46));
+  }
+
   update(dt: number, cam: THREE.PerspectiveCamera) {
     this.t += dt;
     uTime.value = this.t;
@@ -464,6 +526,15 @@ export class BattleScene {
     } else {
       cam.position.set(sx, 5.6 + sy, 9.0);
       cam.lookAt(0.2, 1.6, -1.8);
+    }
+
+    // Après le cadrage, la caméra est à jour : on peut mesurer la densité. Elle ne
+    // bouge qu'au redimensionnement de la fenêtre, donc le recalcul est rare.
+    for (const who of ['mine', 'foe'] as const) {
+      const d = this.density(cam, who === 'mine' ? this.minePos : this.foePos);
+      if (Math.abs(d - this.wpp[who]) < 1e-5) continue;
+      this.wpp[who] = d;
+      for (const f of this.fits) if (f.who === who) this.fit(f);
     }
   }
 

@@ -12,8 +12,17 @@ const CACHE_MAX = 64;
 
 interface Baked { tex: THREE.Texture; target: THREE.WebGLRenderTarget | null; side: number; height: number }
 
-/** Image fournie par un pack : texture recadrée + rapport largeur/hauteur du sujet. */
-export interface PackSprite { tex: THREE.Texture; aspect: number }
+/**
+ * Image fournie par un pack, prête à être posée sur la plateforme.
+ *  - `aspect` : rapport largeur/hauteur du sujet une fois rogné ;
+ *  - `px`     : hauteur du sujet ramenée à une planche de 96 px, la taille des
+ *               sprites de l'ère DS. C'est elle qui fixe la taille à l'écran, de
+ *               sorte qu'un pack en 256 px ne s'affiche pas 2,7 fois plus grand.
+ */
+export interface PackSprite { tex: THREE.Texture; aspect: number; px: number }
+
+/** Définition de référence d'une planche de sprite (la DS travaillait en 96 px). */
+const FRAME_REF = 96;
 
 /** Contexte 2D jetable, hors écran si la plateforme le permet. */
 function ctx2d(w: number, h: number) {
@@ -32,8 +41,9 @@ function ctx2d(w: number, h: number) {
  * carré fixe avec beaucoup de vide autour : sans ce rognage, une petite espèce
  * flotte au-dessus de la plateforme et paraît deux fois trop petite.
  */
-async function trimAlpha(bmp: ImageBitmap): Promise<{ bmp: ImageBitmap; aspect: number }> {
-  const plein = { bmp, aspect: bmp.width / bmp.height || 1 };
+async function trimAlpha(bmp: ImageBitmap): Promise<{ bmp: ImageBitmap; aspect: number; px: number; frame: number }> {
+  const frame = bmp.height || FRAME_REF;
+  const plein = { bmp, aspect: bmp.width / bmp.height || 1, px: FRAME_REF, frame };
   const ctx = ctx2d(bmp.width, bmp.height);
   if (!ctx) return plein;
   try {
@@ -54,7 +64,7 @@ async function trimAlpha(bmp: ImageBitmap): Promise<{ bmp: ImageBitmap; aspect: 
     if (cw === w && ch === h) return plein;                     // déjà au plus juste
     const cut = await createImageBitmap(bmp, x0, y0, cw, ch);
     bmp.close();
-    return { bmp: cut, aspect: cw / ch };
+    return { bmp: cut, aspect: cw / ch, px: (ch / frame) * FRAME_REF, frame };
   } catch { return plein; }                                     // canvas indisponible ou souillé
 }
 
@@ -205,14 +215,18 @@ export class CreatureSprites {
           if (!listed && ++this.misses >= 3) this.packOff = true;
           continue;
         }
-        const { bmp, aspect } = await trimAlpha(await createImageBitmap(await res.blob()));
+        const { bmp, aspect, px, frame } = await trimAlpha(await createImageBitmap(await res.blob()));
         const tex = new THREE.Texture(bmp);
         tex.colorSpace = THREE.SRGBColorSpace;
-        tex.magFilter = tex.minFilter = THREE.NearestFilter;
-        tex.generateMipmaps = false;
+        // Une planche haute définition est réduite à l'écran : sans filtrage ni
+        // mipmaps elle scintillerait. Les planches façon DS restent au plus proche.
+        const gros = frame > FRAME_REF * 1.5;
+        tex.magFilter = gros ? THREE.LinearFilter : THREE.NearestFilter;
+        tex.minFilter = gros ? THREE.LinearMipmapLinearFilter : THREE.NearestFilter;
+        tex.generateMipmaps = gros;
         tex.needsUpdate = true;
         tex.userData.src = 'pack';
-        const hit: PackSprite = { tex, aspect };
+        const hit: PackSprite = { tex, aspect, px };
         this.packHit.set(path, hit);
         this.misses = 0;
         return hit;

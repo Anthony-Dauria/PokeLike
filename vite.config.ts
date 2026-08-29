@@ -9,9 +9,25 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'],
       workbox: {
-        globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
+        // Le pack de sprites est volontairement hors du pré-cache : quelques
+        // centaines de PNG rallongeraient l'installation alors qu'ils ne servent
+        // qu'au fil des rencontres.
+        globPatterns: ['**/*.{js,css,html,svg,woff2}', 'icons/*.png'],
+        globIgnores: ['**/sprites/**'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/\/sprites\//],
+        runtimeCaching: [{
+          // Chaque sprite réellement affiché est gardé : la partie reste jouable
+          // hors ligne, sprites compris, une fois les espèces rencontrées.
+          urlPattern: ({ url }) => url.pathname.includes('/sprites/'),
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'pokelike-sprites',
+            expiration: { maxEntries: 1500, maxAgeSeconds: 60 * 60 * 24 * 365 },
+            cacheableResponse: { statuses: [0, 200] },
+          },
+        }],
       },
       manifest: {
         name: 'PokeLike — Aventure Valmore',
