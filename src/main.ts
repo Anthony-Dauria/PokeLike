@@ -670,6 +670,16 @@ class Game {
     return hautEcran ? 'haut' : 'bas';
   }
   debugShadows() { return this.renderer.gl.shadowMap.enabled; }
+  /** Position du joueur à l'écran, pour cadrer une capture de contrôle. */
+  debugPlayerScreen() {
+    const v = this.overworld.playerScreen(this.renderer.camera);
+    return { x: Math.round(v.x), y: Math.round(v.y) };
+  }
+
+  /** Orientation courante du joueur : contrôle de la correspondance direction/rotation. */
+  debugFacing() {
+    return { facing: this.overworld.facing, heading: +this.overworld.heading.toFixed(3) };
+  }
   debugPerf() {
     const i = this.renderer.gl.info;
     return { draws: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures };

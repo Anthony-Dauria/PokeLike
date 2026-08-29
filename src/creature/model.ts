@@ -647,11 +647,15 @@ export function buildHuman(shirt: number, skin = 0xf2c9a0, hair = 0x3a2a20, cap?
   }
   if (cap !== undefined) {
     g.add(part(SPHERE_R, mat(cap), [0, .99, -.01], [.222, .14, .222]));
-    g.add(part(BOX_R, mat(cap), [0, .965, .18], [.2, .03, .16]));            // visière
+    // Visière courte et relevée : longue, elle masquait tout le visage sous la
+    // caméra plongeante, et l'on ne distinguait plus l'avant de l'arrière.
+    g.add(part(BOX_R, mat(cap), [0, .975, .155], [.195, .028, .10]));
     g.add(part(SPHERE_LO, mat(0xf6f8fc), [0, 1.02, .12], [.05, .04, .04]));
   }
+  // Frange sous la casquette : marque le devant même quand le visage est dans l'ombre.
+  g.add(part(BOX_R, hr, [0, .945, .155], [.17, .035, .07]));
   for (const s of [-1, 1]) {
-    g.add(part(SPHERE_LO, mat(0x11161f), [s * .075, .9, .19], [.032, .042, .02]));   // yeux
+    g.add(part(SPHERE_LO, mat(0x11161f), [s * .072, .878, .188], [.038, .05, .026]));   // yeux
     const arm = part(CAPSULE_R, body, [s * .235, .52, 0], [.052, .17, .052], [0, 0, s * .09]);
     g.add(arm); limbs.push(arm);
     g.add(part(SPHERE_LO, sk, [s * .255, .33, .01], [.058, .07, .058]));             // main
@@ -659,9 +663,11 @@ export function buildHuman(shirt: number, skin = 0xf2c9a0, hair = 0x3a2a20, cap?
     g.add(leg); limbs.push(leg);
     g.add(part(BOX_R, shoe, [s * .1, .04, .03], [.12, .07, .2]));                      // chaussure
   }
-  // sac à dos
+  // Sac à dos, et ses bretelles ramenées sur la poitrine : de face comme de dos,
+  // on sait désormais de quel côté on regarde le personnage.
   g.add(part(BOX_R, mat(0xc4564e), [0, .58, -.16], [.26, .28, .12]));
   g.add(part(BOX_R, mat(0x8f3f3a), [0, .5, -.23], [.18, .1, .04]));
+  for (const s of [-1, 1]) g.add(part(BOX_R, mat(0xc4564e), [s * .095, .6, .145], [.055, .22, .04]));
 
   return { group: g, bob, limbs, height: 1.1 };
 }

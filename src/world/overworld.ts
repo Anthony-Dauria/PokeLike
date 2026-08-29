@@ -1093,6 +1093,12 @@ export class Overworld {
     return undefined;
   }
 
+  /** Projette la tête du joueur en coordonnées écran (CSS). Sert aux captures. */
+  playerScreen(cam: THREE.PerspectiveCamera) {
+    const v = new THREE.Vector3(this.px, .9, this.py).project(cam);
+    return { x: (v.x + 1) / 2 * window.innerWidth, y: (1 - v.y) / 2 * window.innerHeight };
+  }
+
   private syncPlayer() {
     this.player.group.position.set(this.px, 0, this.py);
     this.player.group.rotation.y = this.heading;
